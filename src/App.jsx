@@ -2,17 +2,23 @@ import React from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 
 import AppLayout from './components/AppLayout'
+
+// ── Interviewer pages ──────────────────────────────────────────────────────
 import LandingPage from './pages/LandingPage'
 import LoginPage from './pages/LoginPage'
 import Dashboard from './pages/Dashboard'
 import Interviews from './pages/Interviews'
 import InterviewDetails from './pages/InterviewDetails'
 import LiveSession from './pages/LiveSession'
-import CandidateInterview from './pages/CandidateInterview'
 import CodeAnalysis from './pages/CodeAnalysis'
 import Insights from './pages/Insights'
 
-// Placeholder pages for sidebar links that don't have dedicated designs
+// ── Candidate pages ────────────────────────────────────────────────────────
+import CandidateLogin from './pages/candidate/CandidateLogin'
+import CandidateWaitingRoom from './pages/candidate/CandidateWaitingRoom'
+import CandidateInterviewPage from './pages/candidate/CandidateInterviewPage'
+import CandidateSubmitted from './pages/candidate/CandidateSubmitted'
+
 function ComingSoon({ title }) {
   return (
     <div className="flex items-center justify-center h-64">
@@ -27,17 +33,22 @@ function ComingSoon({ title }) {
 export default function App() {
   return (
     <Routes>
-      {/* Public routes */}
+      {/* ── Public / marketing ── */}
       <Route path="/" element={<LandingPage />} />
+
+      {/* ── Interviewer auth ── */}
       <Route path="/login" element={<LoginPage />} />
 
-      {/* Candidate-facing route (no sidebar) */}
-      <Route path="/interview" element={<CandidateInterview />} />
+      {/* ── Candidate flow (standalone — no sidebar/navbar) ── */}
+      <Route path="/candidate/login" element={<CandidateLogin />} />
+      <Route path="/candidate/waiting-room" element={<CandidateWaitingRoom />} />
+      <Route path="/candidate/interview" element={<CandidateInterviewPage />} />
+      <Route path="/candidate/submitted" element={<CandidateSubmitted />} />
 
-      {/* Live session (full-screen, uses app shell) */}
+      {/* ── Interviewer app (with sidebar + navbar) ── */}
       <Route element={<AppLayout />}>
-        <Route path="/live-session" element={<LiveSession />} />
         <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/live-session" element={<LiveSession />} />
         <Route path="/interviews" element={<Interviews />} />
         <Route path="/interviews/:id" element={<InterviewDetails />} />
         <Route path="/code-analysis" element={<CodeAnalysis />} />
@@ -46,7 +57,7 @@ export default function App() {
         <Route path="/help" element={<ComingSoon title="Help Center" />} />
       </Route>
 
-      {/* Fallback */}
+      {/* ── Fallback ── */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )

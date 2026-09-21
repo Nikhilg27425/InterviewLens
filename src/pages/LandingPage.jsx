@@ -16,6 +16,12 @@ function LandingNavbar() {
           ))}
         </div>
         <div className="flex items-center gap-3">
+          <Link
+            to="/candidate/login"
+            className="text-sm font-medium text-emerald-700 hover:text-emerald-900 border border-emerald-200 bg-emerald-50 px-3 py-1.5 rounded-lg hover:bg-emerald-100 transition-colors"
+          >
+            Candidate Portal
+          </Link>
           <Link to="/login" className="text-sm font-medium text-gray-700 hover:text-gray-900">
             Log In
           </Link>
