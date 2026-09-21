@@ -53,5 +53,7 @@ class UserOut(BaseModel):
     company: str | None
     is_active: bool
     created_at: datetime
+    oauth_provider: str | None = None
+    profile_picture: str | None = None
 
     model_config = {"from_attributes": True}

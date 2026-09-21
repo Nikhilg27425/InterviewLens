@@ -9,6 +9,7 @@ class SessionCreate(BaseModel):
     duration_minutes: int = 60
     problem_ids: list[str] = []          # list of problem UUID strings
     candidate_name: str | None = None
+    candidate_email: str | None = None   # Email for validation
     candidate_role: str | None = None
     scheduled_at: datetime | None = None
 
@@ -20,6 +21,7 @@ class SessionUpdate(BaseModel):
     ai_summary: str | None = None
     final_score: int | None = None
     candidate_name: str | None = None
+    candidate_email: str | None = None
     candidate_role: str | None = None
 
 
@@ -37,6 +39,7 @@ class SessionOut(BaseModel):
     scheduled_at: datetime | None
     created_at: datetime
     candidate_name: str | None
+    candidate_email: str | None
     candidate_role: str | None
     notes: str | None
     ai_summary: str | None
@@ -50,6 +53,7 @@ class SessionSummary(BaseModel):
     title: str
     status: SessionStatus
     candidate_name: str | None
+    candidate_email: str | None
     candidate_role: str | None
     duration_minutes: int
     started_at: datetime | None

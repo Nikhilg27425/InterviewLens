@@ -37,6 +37,7 @@ class InterviewSession(Base):
 
     # Candidate metadata (denormalised for speed)
     candidate_name: Mapped[str | None]  = mapped_column(String(255), nullable=True)
+    candidate_email: Mapped[str | None] = mapped_column(String(255), nullable=True)  # Email for validation
     candidate_role: Mapped[str | None]  = mapped_column(String(255), nullable=True)
 
     # Notes / summary (filled post-session)

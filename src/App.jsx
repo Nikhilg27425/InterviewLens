@@ -6,6 +6,7 @@ import AppLayout from './components/AppLayout'
 // ── Interviewer pages ──────────────────────────────────────────────────────
 import LandingPage from './pages/LandingPage'
 import LoginPage from './pages/LoginPage'
+import OAuthCallback from './pages/OAuthCallback'
 import Dashboard from './pages/Dashboard'
 import Interviews from './pages/Interviews'
 import InterviewDetails from './pages/InterviewDetails'
@@ -38,6 +39,7 @@ export default function App() {
 
       {/* ── Interviewer auth ── */}
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/auth/callback" element={<OAuthCallback />} />
 
       {/* ── Candidate flow (standalone — no sidebar/navbar) ── */}
       <Route path="/candidate/login" element={<CandidateLogin />} />

@@ -19,7 +19,7 @@ class User(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email: Mapped[str]    = mapped_column(String(255), unique=True, nullable=False, index=True)
     full_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    hashed_password: Mapped[str | None] = mapped_column(String(255), nullable=True)  # Nullable for OAuth users
     role: Mapped[UserRole] = mapped_column(SAEnum(UserRole), nullable=False, default=UserRole.interviewer)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
@@ -27,6 +27,11 @@ class User(Base):
 
     # company field for interviewers
     company: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    
+    # OAuth fields
+    oauth_provider: Mapped[str | None] = mapped_column(String(50), nullable=True)  # 'google', 'github', None
+    oauth_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)  # Provider's user ID
+    profile_picture: Mapped[str | None] = mapped_column(String(500), nullable=True)  # Profile picture URL
 
     # relationships
     sessions_as_interviewer: Mapped[list["InterviewSession"]] = relationship(

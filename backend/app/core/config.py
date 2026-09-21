@@ -15,6 +15,13 @@ class Settings(BaseSettings):
 
     ENV: str = "development"
 
+    # OAuth Configuration
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
+    GITHUB_CLIENT_ID: str = ""
+    GITHUB_CLIENT_SECRET: str = ""
+    OAUTH_REDIRECT_URI: str = "http://localhost:5173/auth/callback"
+
     @property
     def cors_origins_list(self) -> List[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",")]

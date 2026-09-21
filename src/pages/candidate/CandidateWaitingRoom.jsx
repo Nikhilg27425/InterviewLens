@@ -93,31 +93,230 @@ export default function CandidateWaitingRoom() {
     return `${sec}s`
   }
 
-  const runChecks = () => {
+  const runChecks = async () => {
     setRunningChecks(true)
     setChecksDone(false)
     setAllPassed(false)
     setCheckStates({ camera: 'idle', mic: 'idle', screen: 'idle', network: 'idle' })
 
     const sequence = ['camera', 'mic', 'screen', 'network']
-    // Simulate sequential checks with delays
-    sequence.forEach((id, i) => {
-      setTimeout(() => {
-        setCheckStates((prev) => ({ ...prev, [id]: 'checking' }))
-      }, i * 800)
+    const results = {}
 
-      setTimeout(() => {
-        // screen always passes (deterministic), others simulate success
-        const pass = true
-        setCheckStates((prev) => ({ ...prev, [id]: pass ? 'pass' : 'fail' }))
-
-        if (i === sequence.length - 1) {
-          setRunningChecks(false)
-          setChecksDone(true)
-          setAllPassed(true)
+    for (let i = 0; i < sequence.length; i++) {
+      const id = sequence[i]
+      
+      // Set to checking
+      setCheckStates((prev) => ({ ...prev, [id]: 'checking' }))
+      
+      // Wait a bit for visual effect
+      await new Promise(resolve => setTimeout(resolve, 300))
+      
+      // Actually perform the checks
+      let passed = false
+      
+      try {
+        if (id === 'camera') {
+          // Check camera access AND verify it can actually record
+          try {
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+              video: { width: { min: 640 }, height: { min: 480 } } 
+            })
+            
+            // Verify we got video tracks
+            const videoTracks = stream.getVideoTracks()
+            if (videoTracks.length === 0) {
+              throw new Error('No video track')
+            }
+            
+            // Verify track is active and enabled
+            const videoTrack = videoTracks[0]
+            if (videoTrack.readyState !== 'live' || !videoTrack.enabled) {
+              throw new Error('Video track not live')
+            }
+            
+            // Test recording for 1 second to ensure it actually works
+            const mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' })
+            let recordedData = []
+            
+            await new Promise((resolve, reject) => {
+              const timeout = setTimeout(() => reject(new Error('Recording timeout')), 3000)
+              
+              mediaRecorder.ondataavailable = (e) => {
+                if (e.data && e.data.size > 0) {
+                  recordedData.push(e.data)
+                }
+              }
+              
+              mediaRecorder.onstop = () => {
+                clearTimeout(timeout)
+                resolve()
+              }
+              
+              mediaRecorder.onerror = (e) => {
+                clearTimeout(timeout)
+                reject(e)
+              }
+              
+              mediaRecorder.start()
+              setTimeout(() => {
+                if (mediaRecorder.state === 'recording') {
+                  mediaRecorder.stop()
+                }
+              }, 1000)
+            })
+            
+            // Verify we actually recorded something
+            if (recordedData.length === 0) {
+              throw new Error('No data recorded')
+            }
+            
+            // Stop all tracks
+            stream.getTracks().forEach(track => track.stop())
+            passed = true
+          } catch (error) {
+            console.error('Camera check failed:', error)
+            passed = false
+          }
+          
+        } else if (id === 'mic') {
+          // Check microphone access AND verify it can actually record audio
+          try {
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+              audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true
+              } 
+            })
+            
+            // Verify we got audio tracks
+            const audioTracks = stream.getAudioTracks()
+            if (audioTracks.length === 0) {
+              throw new Error('No audio track')
+            }
+            
+            // Verify track is active and enabled
+            const audioTrack = audioTracks[0]
+            if (audioTrack.readyState !== 'live' || !audioTrack.enabled) {
+              throw new Error('Audio track not live')
+            }
+            
+            // Test recording for 1 second to ensure it actually works
+            const mediaRecorder = new MediaRecorder(stream)
+            let recordedData = []
+            
+            await new Promise((resolve, reject) => {
+              const timeout = setTimeout(() => reject(new Error('Recording timeout')), 3000)
+              
+              mediaRecorder.ondataavailable = (e) => {
+                if (e.data && e.data.size > 0) {
+                  recordedData.push(e.data)
+                }
+              }
+              
+              mediaRecorder.onstop = () => {
+                clearTimeout(timeout)
+                resolve()
+              }
+              
+              mediaRecorder.onerror = (e) => {
+                clearTimeout(timeout)
+                reject(e)
+              }
+              
+              mediaRecorder.start()
+              setTimeout(() => {
+                if (mediaRecorder.state === 'recording') {
+                  mediaRecorder.stop()
+                }
+              }, 1000)
+            })
+            
+            // Verify we actually recorded something
+            if (recordedData.length === 0) {
+              throw new Error('No audio data recorded')
+            }
+            
+            // Stop all tracks
+            stream.getTracks().forEach(track => track.stop())
+            passed = true
+          } catch (error) {
+            console.error('Microphone check failed:', error)
+            passed = false
+          }
+          
+        } else if (id === 'screen') {
+          // Check screen resolution (minimum 1024x768)
+          passed = window.screen.width >= 1024 && window.screen.height >= 768
+          
+        } else if (id === 'network') {
+          // Check network connection thoroughly
+          if (!navigator.onLine) {
+            passed = false
+          } else {
+            // Test actual network speed by downloading a small file
+            try {
+              const startTime = performance.now()
+              
+              // Use a tiny file from a CDN to test speed (1KB test)
+              const testUrl = 'https://www.google.com/favicon.ico'
+              const response = await fetch(testUrl, { 
+                cache: 'no-cache',
+                method: 'HEAD'  // Just get headers, don't download body
+              })
+              
+              const endTime = performance.now()
+              const latency = endTime - startTime
+              
+              // Check if request succeeded
+              if (!response.ok) {
+                passed = false
+              } else {
+                // Latency should be reasonable (< 2000ms for HEAD request)
+                if (latency > 2000) {
+                  passed = false
+                } else {
+                  // Check connection info if available
+                  if (navigator.connection) {
+                    const connection = navigator.connection
+                    // Require at least 1 Mbps (downlink in Mbps)
+                    const downlink = connection.downlink || connection.bandwidth || 0
+                    
+                    if (downlink > 0 && downlink < 1) {
+                      passed = false
+                    } else {
+                      // Connection is fast enough or we can't detect speed
+                      passed = true
+                    }
+                  } else {
+                    // Can't detect speed but latency is good
+                    passed = true
+                  }
+                }
+              }
+            } catch (error) {
+              console.error('Network check failed:', error)
+              passed = false
+            }
+          }
         }
-      }, i * 800 + 700)
-    })
+      } catch (error) {
+        console.error(`${id} check failed:`, error)
+        passed = false
+      }
+      
+      results[id] = passed
+      setCheckStates((prev) => ({ ...prev, [id]: passed ? 'pass' : 'fail' }))
+      
+      // Small delay before next check
+      await new Promise(resolve => setTimeout(resolve, 200))
+    }
+
+    // All checks done
+    const allChecksPassed = Object.values(results).every(v => v === true)
+    setRunningChecks(false)
+    setChecksDone(true)
+    setAllPassed(allChecksPassed)
   }
 
   const canBegin = allPassed && rulesRead

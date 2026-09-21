@@ -58,6 +58,7 @@ async def create_session(
         duration_minutes=body.duration_minutes,
         problem_ids=",".join(body.problem_ids) if body.problem_ids else None,
         candidate_name=body.candidate_name,
+        candidate_email=body.candidate_email,
         candidate_role=body.candidate_role,
         scheduled_at=body.scheduled_at,
         status=SessionStatus.scheduled,

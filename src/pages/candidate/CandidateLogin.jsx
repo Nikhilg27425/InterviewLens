@@ -49,9 +49,12 @@ export default function CandidateLogin() {
         setLoading(false)
         navigate('/candidate/waiting-room')
       })
-      .catch(() => {
+      .catch((err) => {
         setLoading(false)
-        navigate('/candidate/waiting-room') // demo fallback
+        // Show actual error instead of bypassing to demo mode
+        const errorMessage = err.response?.data?.detail || err.message || 'Authentication failed. Please check your credentials.'
+        setError(errorMessage)
+        console.error('Candidate login error:', err)
       })
   }
 

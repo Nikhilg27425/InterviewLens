@@ -42,6 +42,10 @@ export const authAPI = {
   loginInterviewer:    (email, pass)  => api.post('/api/auth/login', { email, password: pass }),
   loginCandidate:      (email, token) => api.post('/api/auth/candidate/login', { email, access_token: token }),
   me:                  ()             => api.get('/api/auth/me'),
+  
+  // OAuth methods - These return URLs for redirecting to OAuth providers
+  googleLogin:         ()             => `${BASE_URL}/api/auth/google/login`,
+  githubLogin:         ()             => `${BASE_URL}/api/auth/github/login`,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
