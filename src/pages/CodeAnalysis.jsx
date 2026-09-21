@@ -1,5 +1,7 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Download, ShieldAlert, ExternalLink, ChevronLeft, ChevronRight, Copy, Maximize2, AlertTriangle } from 'lucide-react'
+import { analyticsAPI } from '../services/api'
 
 const CANDIDATE_CODE = `function calculateTotal(price, tax, di
   const taxAmount = price * (tax / 100
@@ -76,6 +78,22 @@ function CodePanel({ title, badge, code, lang }) {
 
 export default function CodeAnalysis() {
   const [viewMode, setViewMode] = useState('Split')
+  const [searchParams] = useSearchParams()
+  const sessionId = searchParams.get('session')
+  const [reports, setReports] = useState([])
+  const [activeReport, setActiveReport] = useState(null)
+
+  useEffect(() => {
+    if (!sessionId) return
+    analyticsAPI.similarity(sessionId)
+      .then(({ data }) => {
+        if (data?.length) {
+          setReports(data)
+          setActiveReport(data[0])
+        }
+      })
+      .catch(() => {}) // silent fallback to static demo data
+  }, [sessionId])
 
   return (
     <div className="p-6 space-y-5">

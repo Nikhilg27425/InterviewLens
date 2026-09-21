@@ -1,13 +1,15 @@
-import React, { useState, useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import React, { useState, useEffect, useRef } from 'react'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import {
   Maximize2, Square, Clock, AlertTriangle, CheckCircle,
   Info, Send, MessageSquare, Copy, Eye, MoreVertical,
-  ChevronDown, Activity,
+  ChevronDown, Activity, Wifi, WifiOff, ShieldAlert,
 } from 'lucide-react'
 import { BarChart, Bar, ResponsiveContainer, XAxis } from 'recharts'
 import CodeEditorPane from '../components/CodeEditorPane'
 import { PROBLEMS } from '../data/problems'
+import { useInterviewSocket } from '../hooks/useInterviewSocket'
+import { sessionsAPI, signalsAPI } from '../services/api'
 
 // ─── Static seed data ─────────────────────────────────────────────────────────
 
@@ -92,6 +94,9 @@ function SignalCard({ type, title, time, desc }) {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function LiveSession() {
+  const [searchParams] = useSearchParams()
+  const sessionId = searchParams.get('session') || null
+
   const [timeLeft,   setTimeLeft]   = useState(40 * 60 + 49)
   const [messages,   setMessages]   = useState(SEED_CHAT)
   const [inputMsg,   setInputMsg]   = useState('')
@@ -101,8 +106,67 @@ export default function LiveSession() {
     Object.fromEntries(PROBLEMS.map((p) => [p.id, { ...p.starterCode }]))
   )
   const [showProblemPicker, setShowProblemPicker] = useState(false)
+  const [liveSignals, setLiveSignals] = useState(SIGNALS)
 
   const problem = PROBLEMS[problemIdx]
+
+  // ── WebSocket — receive live updates from candidate ──
+  const { connected, lastMessage, send } = useInterviewSocket(sessionId)
+
+  useEffect(() => {
+    if (!lastMessage) return
+    const msg = lastMessage
+
+    // Live code sync from candidate
+    if (msg.type === 'code_update' && msg.code !== undefined) {
+      const matchIdx = PROBLEMS.findIndex(p => String(p.id) === String(msg.problem_id))
+      if (matchIdx >= 0) {
+        const p = PROBLEMS[matchIdx]
+        setCodes(prev => ({
+          ...prev,
+          [p.id]: { ...prev[p.id], [msg.language || lang]: msg.code }
+        }))
+        if (matchIdx !== problemIdx) setProblemIdx(matchIdx)
+        if (msg.language && msg.language !== lang) setLang(msg.language)
+      }
+    }
+
+    // Incoming proctoring signal
+    if (msg.type === 'signal') {
+      const riskColors = { critical:'alert', high:'alert', medium:'info', low:'info', info:'info' }
+      setLiveSignals(prev => [{
+        type: riskColors[msg.risk_level] || 'info',
+        title: msg.signal_type.replace(/_/g,' ').replace(/\b\w/g, c => c.toUpperCase()),
+        time: new Date().toLocaleTimeString(),
+        desc: msg.detail ? (typeof msg.detail === 'string' ? msg.detail : JSON.stringify(msg.detail)) : `${msg.signal_type} detected`,
+      }, ...prev.slice(0, 9)])
+    }
+
+    // Incoming chat
+    if (msg.type === 'chat' && msg.role === 'candidate') {
+      setMessages(prev => [...prev, {
+        id: Date.now(), sender: 'candidate',
+        text: msg.text, time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+      }])
+    }
+  }, [lastMessage])
+
+  // Load session signals from DB on mount
+  useEffect(() => {
+    if (!sessionId) return
+    signalsAPI.forSession(sessionId)
+      .then(({ data }) => {
+        if (data?.length) {
+          setLiveSignals(data.slice(0,10).map(s => ({
+            type: ['critical','high'].includes(s.risk_level) ? 'alert' : 'info',
+            title: s.signal_type.replace(/_/g,' ').replace(/\b\w/g, c => c.toUpperCase()),
+            time: new Date(s.timestamp).toLocaleTimeString(),
+            desc: s.detail || s.signal_type,
+          })))
+        }
+      })
+      .catch(() => {})
+  }, [sessionId])
 
   useEffect(() => {
     const t = setInterval(() => setTimeLeft((s) => (s > 0 ? s - 1 : 0)), 1000)
@@ -124,6 +188,8 @@ export default function LiveSession() {
 
   const sendMessage = () => {
     if (!inputMsg.trim()) return
+    // Send over WS if connected
+    if (sessionId) send({ type: 'chat', text: inputMsg })
     setMessages([...messages, {
       id: Date.now(), sender: 'interviewer',
       text: inputMsg, time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
@@ -300,15 +366,21 @@ export default function LiveSession() {
               <h3 className="text-sm font-bold text-gray-900 flex items-center gap-1.5">
                 <span className="text-blue-500">⚡</span> Live Signals
                 <span className="bg-blue-600 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center ml-0.5">
-                  {SIGNALS.length}
+                  {liveSignals.length}
                 </span>
               </h3>
+              {sessionId && (
+                <div className={`flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full ${connected ? 'text-emerald-600 bg-emerald-50' : 'text-gray-400 bg-gray-100'}`}>
+                  {connected ? <Wifi size={10} /> : <WifiOff size={10} />}
+                  {connected ? 'Live' : 'Demo'}
+                </div>
+              )}
             </div>
             <p className="text-xs text-gray-400">Neutral monitoring of interview events.</p>
           </div>
 
           <div className="p-3 space-y-2 overflow-y-auto flex-shrink-0 max-h-56 border-b border-gray-100">
-            {SIGNALS.map((s, i) => <SignalCard key={i} {...s} />)}
+            {liveSignals.map((s, i) => <SignalCard key={i} {...s} />)}
           </div>
 
           {/* Chat */}

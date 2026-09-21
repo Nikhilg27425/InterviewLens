@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Users, TrendingUp, CheckCircle, AlertTriangle,
@@ -6,8 +6,9 @@ import {
   Clock, MoreHorizontal, Filter, RotateCcw, Activity,
 } from 'lucide-react'
 import {
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
+import { sessionsAPI, signalsAPI } from '../services/api'
 
 const weeklyData = [
   { day: 'Mon', interviews: 8, quality: 7 },
@@ -147,6 +148,26 @@ function StatCard({ label, value, delta, up, icon: Icon, color }) {
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState('All')
+  const [liveSessions, setLiveSessions] = useState(sessions) // start with static fallback
+  const [riskTotal, setRiskTotal] = useState(4)
+
+  // Load real sessions from backend (falls back silently if backend not running)
+  useEffect(() => {
+    sessionsAPI.list()
+      .then(({ data }) => {
+        if (data?.length) setLiveSessions(data.map(s => ({
+          name: s.candidate_name || 'Unknown Candidate',
+          role: s.candidate_role || 'Candidate',
+          time: s.started_at ? new Date(s.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—',
+          status: s.status === 'active' ? 'Live' : s.status === 'waiting' ? 'Waiting' : 'Completed',
+          risk: 'Clean session',
+          riskLevel: 'clean',
+          avatar: (s.candidate_name || 'UN').split(' ').map(w => w[0]).join('').slice(0,2).toUpperCase(),
+          id: s.id,
+        })))
+      })
+      .catch(() => {}) // silent fallback
+  }, [])
 
   return (
     <div className="p-6 space-y-6">

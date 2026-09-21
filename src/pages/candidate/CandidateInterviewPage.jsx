@@ -1,13 +1,20 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Clock, ChevronLeft, ChevronRight, CheckCircle,
   AlertTriangle, Send, Maximize2, Minimize2,
-  List, X, HelpCircle, AlertCircle,
+  List, X, HelpCircle, AlertCircle, Wifi, WifiOff,
 } from 'lucide-react'
 import Logo from '../../components/Logo'
 import CodeEditorPane from '../../components/CodeEditorPane'
 import { PROBLEMS } from '../../data/problems'
+import { useProctoring } from '../../hooks/useProctoring'
+import { useInterviewSocket } from '../../hooks/useInterviewSocket'
+import { analyticsAPI, submissionsAPI } from '../../services/api'
+
+// Get session context from localStorage (set at candidate login)
+const SESSION_ID   = localStorage.getItem('session_id')   || null
+const CANDIDATE_ID = localStorage.getItem('user_id')      || null
 
 // ─── Difficulty badge colours ─────────────────────────────────────────────────
 const DIFF = {
@@ -131,6 +138,40 @@ export default function CandidateInterviewPage() {
 
   const problem = PROBLEMS[currentIdx]
 
+  // ── WebSocket connection ──
+  const { connected, lastMessage, send } = useInterviewSocket(SESSION_ID)
+
+  // ── Proctoring ──
+  const { signals: procSignals } = useProctoring({
+    sessionId: SESSION_ID,
+    elapsedSeconds: TOTAL - timeLeft,
+    ws: null,   // signals go via REST batch; WS used for code sync only
+    enabled: !!SESSION_ID,
+  })
+
+  // ── Auto-save snapshot every 30s ──
+  const snapshotTimer = useRef(null)
+  useEffect(() => {
+    if (!SESSION_ID) return
+    snapshotTimer.current = setInterval(async () => {
+      try {
+        await analyticsAPI.saveSnapshot({
+          session_id:      SESSION_ID,
+          problem_id:      problem.id,
+          language:        lang,
+          source_code:     codes[problem.id]?.[lang] || '',
+          elapsed_seconds: TOTAL - timeLeft,
+        })
+      } catch { /* silent */ }
+    }, 30000)
+    return () => clearInterval(snapshotTimer.current)
+  }, [problem.id, lang, timeLeft])
+
+  // ── Send code updates over WebSocket ──
+  const sendCodeUpdate = (problemId, language, code) => {
+    send({ type: 'code_update', problem_id: problemId, language, code })
+  }
+
   // Countdown
   useEffect(() => {
     const t = setInterval(() => setTimeLeft((s) => (s > 0 ? s - 1 : 0)), 1000)
@@ -154,6 +195,8 @@ export default function CandidateInterviewPage() {
       ...prev,
       [problem.id]: { ...prev[problem.id], [lang]: val },
     }))
+    // Debounced WS code sync
+    sendCodeUpdate(problem.id, lang, val)
   }
 
   const handleLangChange = (l) => {
@@ -278,6 +321,13 @@ export default function CandidateInterviewPage() {
           >
             <HelpCircle size={16} />
           </button>
+          {/* WS connectivity indicator */}
+          {SESSION_ID && (
+            <div className={`flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-full ${connected ? 'text-emerald-600 bg-emerald-50' : 'text-gray-400 bg-gray-100'}`}>
+              {connected ? <Wifi size={12} /> : <WifiOff size={12} />}
+              {connected ? 'Live' : 'Offline'}
+            </div>
+          )}
           <button
             onClick={() => setFullscreen(!fullscreen)}
             className="p-2 rounded-lg text-gray-400 hover:bg-gray-100 transition-colors"

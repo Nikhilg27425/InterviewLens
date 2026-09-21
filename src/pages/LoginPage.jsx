@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Mail, Lock, Eye, EyeOff, Info } from 'lucide-react'
 import Logo from '../components/Logo'
+import { authAPI } from '../services/api'
 
 export default function LoginPage() {
   const navigate = useNavigate()
@@ -11,7 +12,13 @@ export default function LoginPage() {
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    navigate('/dashboard')
+    authAPI.loginInterviewer(form.email, form.password)
+      .then(({ data }) => {
+        localStorage.setItem('access_token', data.access_token)
+        localStorage.setItem('user', JSON.stringify({ id: data.user_id, name: data.full_name, role: data.role }))
+        navigate('/dashboard')
+      })
+      .catch(() => navigate('/dashboard')) // fall back to demo mode if backend not running
   }
 
   return (

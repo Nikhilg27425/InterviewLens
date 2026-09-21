@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
   Download, Share2, Play, Code2, AlertTriangle,
@@ -7,6 +7,7 @@ import {
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
+import { sessionsAPI, analyticsAPI, signalsAPI } from '../services/api'
 
 const behavioralData = Array.from({ length: 61 }, (_, i) => ({
   t: i,
@@ -102,6 +103,39 @@ function SignalCard({ type, category, title, time, desc }) {
 export default function InterviewDetails() {
   const { id } = useParams()
   const [activeTab, setActiveTab] = useState('Session Overview')
+  const [sessionData, setSessionData] = useState(null)
+  const [timelineData, setTimelineData] = useState(behavioralData)
+  const [realSignals, setRealSignals] = useState(null)
+  const [similarityData, setSimilarityData] = useState(null)
+
+  useEffect(() => {
+    if (!id) return
+    // Load session, timeline, and signals in parallel — silent fallback on error
+    Promise.all([
+      sessionsAPI.get(id).catch(() => null),
+      analyticsAPI.timeline(id).catch(() => null),
+      signalsAPI.forSession(id).catch(() => null),
+      analyticsAPI.similarity(id).catch(() => null),
+    ]).then(([sess, timeline, signals, similarity]) => {
+      if (sess)      setSessionData(sess.data)
+      if (timeline?.data?.engagement?.length) {
+        setTimelineData(
+          timeline.data.engagement.map(e => ({
+            t: Math.round(e.elapsed_seconds / 60),
+            engagement: Math.min(100, e.keystroke_rate * 10),
+            focus: Math.min(100, e.char_count / 50),
+            risk: timeline.data.signals.some(
+              s => s.elapsed_seconds >= e.elapsed_seconds - 30 &&
+                   s.elapsed_seconds <= e.elapsed_seconds + 30 &&
+                   ['high','critical'].includes(s.risk_level)
+            ) ? 35 : 0,
+          }))
+        )
+      }
+      if (signals?.data?.length) setRealSignals(signals.data)
+      if (similarity?.data)      setSimilarityData(similarity.data)
+    })
+  }, [id])
 
   return (
     <div className="p-6 space-y-5">

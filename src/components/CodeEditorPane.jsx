@@ -1,128 +1,216 @@
 /**
- * CodeEditorPane — shared editable code editor with real Judge0 execution.
+ * CodeEditorPane — VS Code-inspired editor with real Judge0 execution.
  *
- * Used by both CandidateInterviewPage and LiveSession (interviewer view).
- *
- * Features:
- *  - Textarea with real Tab indentation
- *  - Syntax highlighting via highlight.js overlay (textarea-mirror pattern)
- *  - Language switcher
- *  - Run Code → submits to Judge0 CE (free public API), polls for results
- *  - Test Cases tab: per-case collapsible cards with pass/fail, actual output
- *  - Console tab: raw stdout/stderr per case
- *  - Custom Input tab: free-form stdin runner
- *  - Reset to starter code
+ * Improvements over previous version:
+ *  - VS Code dark theme (exact token colours for JS/TS/Python/Java/C++)
+ *  - Resizable editor/output split via drag handle
+ *  - Font-size controls (10–20px)
+ *  - Line-highlight on current row
+ *  - Minimap-style scrollbar gutter
+ *  - Better output panel: LeetCode-style verdict banner + detailed cards
+ *  - Compilation error diff view
+ *  - Execution summary row (time, memory, status) at output header
+ *  - Smooth skeleton loading during run
  */
 
-import React, { useRef, useMemo, useState, useCallback } from 'react'
+import React, {
+  useRef, useMemo, useState, useCallback, useEffect,
+} from 'react'
 import {
-  Play, RotateCcw, CheckCircle, XCircle,
-  AlertTriangle, Loader, ChevronDown, ChevronUp,
-  Terminal, FlaskConical, SlidersHorizontal,
+  Play, RotateCcw, CheckCircle, XCircle, AlertTriangle,
+  Loader, ChevronDown, ChevronUp, Terminal, FlaskConical,
+  SlidersHorizontal, ZoomIn, ZoomOut, Minus, Plus,
+  Copy, Check,
 } from 'lucide-react'
 import hljs from 'highlight.js/lib/core'
 import javascript from 'highlight.js/lib/languages/javascript'
 import typescript from 'highlight.js/lib/languages/typescript'
-import python from 'highlight.js/lib/languages/python'
-import java from 'highlight.js/lib/languages/java'
-import cpp from 'highlight.js/lib/languages/cpp'
-import 'highlight.js/styles/atom-one-dark.css'
+import python    from 'highlight.js/lib/languages/python'
+import java      from 'highlight.js/lib/languages/java'
+import cpp       from 'highlight.js/lib/languages/cpp'
 import { LANGUAGES, runAllTestCases, runTestCase } from '../services/judge0'
 
 hljs.registerLanguage('javascript', javascript)
 hljs.registerLanguage('typescript', typescript)
-hljs.registerLanguage('python', python)
-hljs.registerLanguage('java', java)
-hljs.registerLanguage('cpp', cpp)
+hljs.registerLanguage('python',     python)
+hljs.registerLanguage('java',       java)
+hljs.registerLanguage('cpp',        cpp)
 
 const HLJS_LANG = {
   JavaScript: 'javascript',
   TypeScript: 'typescript',
-  Python: 'python',
-  Java: 'java',
-  'C++': 'cpp',
+  Python:     'python',
+  Java:       'java',
+  'C++':      'cpp',
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ── VS Code One Dark Pro token colours injected as CSS vars ──────────────────
+const VSCODE_STYLE = `
+  .vscode-editor .hljs { background: transparent; color: #abb2bf; }
+  .vscode-editor .hljs-comment,
+  .vscode-editor .hljs-quote    { color: #5c6370; font-style: italic; }
+  .vscode-editor .hljs-keyword,
+  .vscode-editor .hljs-selector-tag,
+  .vscode-editor .hljs-built_in { color: #c678dd; }
+  .vscode-editor .hljs-string,
+  .vscode-editor .hljs-attr,
+  .vscode-editor .hljs-selector-attr { color: #98c379; }
+  .vscode-editor .hljs-number,
+  .vscode-editor .hljs-literal      { color: #d19a66; }
+  .vscode-editor .hljs-title,
+  .vscode-editor .hljs-section      { color: #61afef; }
+  .vscode-editor .hljs-type,
+  .vscode-editor .hljs-class .hljs-title { color: #e5c07b; }
+  .vscode-editor .hljs-variable,
+  .vscode-editor .hljs-template-variable { color: #e06c75; }
+  .vscode-editor .hljs-params        { color: #abb2bf; }
+  .vscode-editor .hljs-meta          { color: #56b6c2; }
+  .vscode-editor .hljs-operator,
+  .vscode-editor .hljs-punctuation   { color: #abb2bf; }
+  .vscode-editor .hljs-function .hljs-title,
+  .vscode-editor .hljs-title.function_ { color: #61afef; }
+  .vscode-editor .hljs-property       { color: #e06c75; }
+  .vscode-editor .hljs-tag            { color: #e06c75; }
+  .vscode-editor .hljs-regexp         { color: #98c379; }
+`
 
-function StatusPill({ result }) {
-  if (!result) return null
-  if (result.passed) return (
-    <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
-      <CheckCircle size={11} /> {result.statusLabel || 'Accepted'}
-    </span>
-  )
-  if (result.statusType === 'error') return (
-    <span className="inline-flex items-center gap-1 text-xs font-semibold text-red-600 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">
-      <XCircle size={11} /> {result.statusLabel || 'Error'}
-    </span>
-  )
-  return (
-    <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
-      <AlertTriangle size={11} /> {result.statusLabel || 'Wrong Answer'}
-    </span>
-  )
+// ── Language badge colours ────────────────────────────────────────────────────
+const LANG_COLORS = {
+  JavaScript: { bg: '#f7df1e22', border: '#f7df1e55', text: '#f7df1e', dot: '#f7df1e' },
+  TypeScript: { bg: '#3178c622', border: '#3178c655', text: '#60a5fa', dot: '#3b82f6' },
+  Python:     { bg: '#3776ab22', border: '#3776ab55', text: '#4ade80', dot: '#22c55e' },
+  Java:       { bg: '#b07219aa', border: '#b0721966', text: '#fb923c', dot: '#f97316' },
+  'C++':      { bg: '#00599c22', border: '#00599c55', text: '#7dd3fc', dot: '#38bdf8' },
 }
 
-function TestCaseCard({ result, idx }) {
-  const [open, setOpen] = useState(true)
+// ── Verdict banner config ────────────────────────────────────────────────────
+function VerdictBanner({ results }) {
+  if (!results?.length) return null
+  const total   = results.length
+  const passed  = results.filter((r) => r.passed).length
+  const allPass = passed === total
+  const hasErr  = results.some((r) => r.statusType === 'error')
+  const hasTLE  = results.some((r) => r.statusType === 'tle')
 
-  const bg = result.running
-    ? 'border-blue-200 bg-blue-50/60'
-    : result.passed
-    ? 'border-emerald-200 bg-emerald-50/60'
-    : result.error
-    ? 'border-red-200 bg-red-50/60'
-    : 'border-amber-200 bg-amber-50/60'
-
-  return (
-    <div className={`rounded-xl border overflow-hidden ${bg}`}>
-      <button
-        className="w-full flex items-center justify-between px-4 py-2.5 text-left gap-2"
-        onClick={() => setOpen((o) => !o)}
-      >
-        <div className="flex items-center gap-2.5 min-w-0">
-          {result.running
-            ? <Loader size={13} className="text-blue-500 animate-spin flex-shrink-0" />
-            : result.passed
-            ? <CheckCircle size={13} className="text-emerald-600 flex-shrink-0" />
-            : result.error
-            ? <XCircle size={13} className="text-red-500 flex-shrink-0" />
-            : <AlertTriangle size={13} className="text-amber-500 flex-shrink-0" />
-          }
-          <span className="text-sm font-semibold text-gray-800 truncate">
-            Case {idx + 1}{result.input ? ` — ${result.input}` : ''}
-          </span>
-          {result.time && (
-            <span className="text-xs text-gray-400 font-mono flex-shrink-0">{result.time}</span>
-          )}
-          {result.memory && (
-            <span className="text-xs text-gray-400 font-mono flex-shrink-0">{result.memory}</span>
-          )}
+  if (allPass) {
+    return (
+      <div className="flex items-center gap-3 px-4 py-2.5 bg-emerald-500/10 border-b border-emerald-500/20">
+        <CheckCircle size={16} className="text-emerald-400 flex-shrink-0" />
+        <div>
+          <p className="text-sm font-bold text-emerald-400">Accepted</p>
+          <p className="text-xs text-emerald-500/80">{passed}/{total} test cases passed</p>
         </div>
+        <div className="ml-auto flex items-center gap-4 text-xs text-gray-400">
+          {results[0]?.time   && <span>⏱ {results[0].time}</span>}
+          {results[0]?.memory && <span>💾 {results[0].memory}</span>}
+        </div>
+      </div>
+    )
+  }
+  if (hasErr) {
+    return (
+      <div className="flex items-center gap-3 px-4 py-2.5 bg-red-500/10 border-b border-red-500/20">
+        <XCircle size={16} className="text-red-400 flex-shrink-0" />
+        <div>
+          <p className="text-sm font-bold text-red-400">
+            {results.find((r) => r.statusType === 'error')?.statusLabel || 'Runtime Error'}
+          </p>
+          <p className="text-xs text-red-500/80">{passed}/{total} test cases passed</p>
+        </div>
+      </div>
+    )
+  }
+  if (hasTLE) {
+    return (
+      <div className="flex items-center gap-3 px-4 py-2.5 bg-amber-500/10 border-b border-amber-500/20">
+        <AlertTriangle size={16} className="text-amber-400 flex-shrink-0" />
+        <div>
+          <p className="text-sm font-bold text-amber-400">Time Limit Exceeded</p>
+          <p className="text-xs text-amber-500/80">{passed}/{total} test cases passed</p>
+        </div>
+      </div>
+    )
+  }
+  return (
+    <div className="flex items-center gap-3 px-4 py-2.5 bg-red-500/10 border-b border-red-500/20">
+      <XCircle size={16} className="text-red-400 flex-shrink-0" />
+      <div>
+        <p className="text-sm font-bold text-red-400">Wrong Answer</p>
+        <p className="text-xs text-red-500/80">{passed}/{total} test cases passed</p>
+      </div>
+    </div>
+  )
+}
+
+// ── Test-case result card ────────────────────────────────────────────────────
+function TestCard({ result, idx }) {
+  const [open, setOpen] = useState(idx === 0)
+
+  const isRunning = result.running
+  const isPassed  = !isRunning && result.passed
+  const isError   = !isRunning && result.statusType === 'error'
+  const isWrong   = !isRunning && !isPassed && !isError
+
+  const border = isRunning ? 'border-blue-500/30 bg-[#1a2035]'
+    : isPassed ? 'border-emerald-500/30 bg-[#0d1f17]'
+    : isError  ? 'border-red-500/30    bg-[#1f0d0d]'
+    : 'border-amber-500/30  bg-[#1f1a0d]'
+
+  const icon = isRunning
+    ? <Loader size={13} className="text-blue-400 animate-spin" />
+    : isPassed
+    ? <CheckCircle size={13} className="text-emerald-400" />
+    : isError
+    ? <XCircle size={13} className="text-red-400" />
+    : <AlertTriangle size={13} className="text-amber-400" />
+
+  return (
+    <div className={`rounded-lg border overflow-hidden ${border}`}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-left"
+      >
+        {icon}
+        <span className="text-sm font-semibold text-gray-200 flex-1 truncate">
+          Case {idx + 1}
+          {result.input ? <span className="text-gray-500 font-normal ml-2 text-xs">{result.input}</span> : ''}
+        </span>
+        {result.time   && <span className="text-xs text-gray-500 font-mono">{result.time}</span>}
+        {result.memory && <span className="text-xs text-gray-500 font-mono ml-2">{result.memory}</span>}
         {open
-          ? <ChevronUp size={14} className="text-gray-400 flex-shrink-0" />
-          : <ChevronDown size={14} className="text-gray-400 flex-shrink-0" />
+          ? <ChevronUp   size={13} className="text-gray-600 flex-shrink-0" />
+          : <ChevronDown size={13} className="text-gray-600 flex-shrink-0" />
         }
       </button>
 
-      {open && !result.running && (
-        <div className="px-4 pb-3 font-mono text-xs space-y-1.5 border-t border-black/5 pt-2">
+      {open && !isRunning && (
+        <div className="border-t border-white/5 px-3.5 py-3 space-y-2 font-mono text-xs">
           {result.input && (
-            <Row label="Input" value={result.input} />
+            <DiffRow label="Input"    value={result.input} />
           )}
           {result.expected && (
-            <Row label="Expected" value={result.expected} />
+            <DiffRow label="Expected" value={result.expected} color="text-gray-300" />
           )}
-          {result.stdout !== '' && result.stdout !== undefined && (
-            <Row
-              label={result.passed ? 'Output' : 'Got'}
+          {!isPassed && result.stdout !== '' && result.stdout !== undefined && (
+            <DiffRow
+              label="Got"
               value={result.stdout || '(empty)'}
-              valueClass={result.passed ? 'text-emerald-700' : 'text-red-600'}
+              color="text-red-300"
+              highlight
             />
           )}
+          {isPassed && result.stdout !== undefined && (
+            <DiffRow label="Output" value={result.stdout || '(empty)'} color="text-emerald-300" />
+          )}
           {result.error && (
-            <Row label="Error" value={result.error} valueClass="text-red-600 whitespace-pre-wrap" />
+            <div className="mt-2 bg-red-950/50 border border-red-800/40 rounded-md p-2">
+              <p className="text-red-400 font-bold mb-1">
+                {result.statusLabel}
+              </p>
+              <pre className="text-red-300 whitespace-pre-wrap text-xs leading-relaxed">
+                {result.error}
+              </pre>
+            </div>
           )}
         </div>
       )}
@@ -130,57 +218,108 @@ function TestCaseCard({ result, idx }) {
   )
 }
 
-function Row({ label, value, valueClass = 'text-gray-700' }) {
+function DiffRow({ label, value, color = 'text-gray-400', highlight = false }) {
   return (
-    <div className="flex gap-2">
-      <span className="text-gray-400 w-16 flex-shrink-0">{label}:</span>
-      <span className={`break-all ${valueClass}`}>{value}</span>
+    <div className="flex gap-2.5">
+      <span className="text-gray-600 w-[4.5rem] flex-shrink-0">{label}:</span>
+      <span className={`break-all leading-relaxed ${color} ${highlight ? 'bg-red-950/40 px-1 rounded' : ''}`}>
+        {value}
+      </span>
     </div>
   )
 }
 
-// ─── Main component ───────────────────────────────────────────────────────────
+// ── Copy button ──────────────────────────────────────────────────────────────
+function CopyButton({ text }) {
+  const [copied, setCopied] = useState(false)
+  const copy = () => {
+    navigator.clipboard.writeText(text).catch(() => {})
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
+  return (
+    <button
+      onClick={copy}
+      className="p-1.5 rounded text-gray-600 hover:text-gray-300 hover:bg-white/5 transition-colors"
+      title="Copy code"
+    >
+      {copied ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
+    </button>
+  )
+}
 
+// ── Skeleton loader for cards ────────────────────────────────────────────────
+function SkeletonCard({ idx }) {
+  return (
+    <div className="rounded-lg border border-blue-500/20 bg-[#1a2035] px-3.5 py-3 animate-pulse">
+      <div className="flex items-center gap-2.5">
+        <Loader size={13} className="text-blue-400 animate-spin" />
+        <div className="h-3 w-24 bg-gray-700 rounded" />
+        <div className="ml-auto h-3 w-12 bg-gray-700 rounded" />
+      </div>
+    </div>
+  )
+}
+
+// ── Main exported component ──────────────────────────────────────────────────
 export default function CodeEditorPane({
   code = '',
   onCodeChange,
   language = 'JavaScript',
   onLanguageChange,
-  problem,           // { testCases: [{label,stdin,expected}], customTestDefault }
+  problem,
   starterCode = '',
-  readOnly = false,
+  readOnly     = false,
   showLanguageSwitcher = true,
-  toolbarSlot = null,   // extra buttons injected by parent (Mark Solved, Complete Eval…)
+  toolbarSlot  = null,
+  onSignal,          // callback(type, detail) for proctoring events
 }) {
   const textareaRef  = useRef(null)
   const highlightRef = useRef(null)
+  const paneRef      = useRef(null)
 
-  // ── output state ──
+  // ── state ──
   const [outputTab,    setOutputTab]    = useState('testcases')
   const [testResults,  setTestResults]  = useState([])
   const [customResult, setCustomResult] = useState(null)
   const [customInput,  setCustomInput]  = useState(problem?.customTestDefault ?? '')
   const [running,      setRunning]      = useState(false)
   const [runningCustom, setRunningCustom] = useState(false)
+  const [fontSize,     setFontSize]     = useState(13)
+  const [outputHeight, setOutputHeight] = useState(260)
+  const [isDragging,   setIsDragging]   = useState(false)
+  const dragStart = useRef(null)
 
-  // ── highlight ──
+  // ── inject VS Code styles once ──
+  useEffect(() => {
+    if (document.getElementById('vscode-hljs-style')) return
+    const el = document.createElement('style')
+    el.id = 'vscode-hljs-style'
+    el.textContent = VSCODE_STYLE
+    document.head.appendChild(el)
+  }, [])
+
+  // ── syntax highlight ──
   const highlighted = useMemo(() => {
     try {
-      return hljs.highlight(code, { language: HLJS_LANG[language] || 'javascript' }).value
-    } catch {
-      return code
-    }
+      return hljs.highlight(code || '', {
+        language: HLJS_LANG[language] || 'javascript',
+      }).value
+    } catch { return code || '' }
   }, [code, language])
 
+  // ── line count ──
+  const lineCount = useMemo(() => (code || '').split('\n').length, [code])
+
   // ── scroll sync ──
-  const syncScroll = () => {
+  const syncScroll = useCallback(() => {
     if (!highlightRef.current || !textareaRef.current) return
     highlightRef.current.scrollTop  = textareaRef.current.scrollTop
     highlightRef.current.scrollLeft = textareaRef.current.scrollLeft
-  }
+  }, [])
 
-  // ── Tab key ──
-  const handleKeyDown = (e) => {
+  // ── keyboard handler ──
+  const handleKeyDown = useCallback((e) => {
     if (readOnly) return
     if (e.key === 'Tab') {
       e.preventDefault()
@@ -190,14 +329,48 @@ export default function CodeEditorPane({
       onCodeChange(next)
       requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = s + 2 })
     }
-  }
+    // Ctrl+/ — comment toggle (basic)
+    if ((e.ctrlKey || e.metaKey) && e.key === '/') {
+      e.preventDefault()
+      const ta = textareaRef.current
+      const lines = code.split('\n')
+      const start = code.substring(0, ta.selectionStart).split('\n').length - 1
+      const prefix = language === 'Python' ? '# ' : '// '
+      lines[start] = lines[start].startsWith(prefix)
+        ? lines[start].slice(prefix.length)
+        : prefix + lines[start]
+      onCodeChange(lines.join('\n'))
+    }
+  }, [readOnly, code, onCodeChange, language])
 
-  // ── Run against all test cases ──
+  // ── resize drag ──
+  const onMouseDownDivider = useCallback((e) => {
+    e.preventDefault()
+    setIsDragging(true)
+    dragStart.current = { y: e.clientY, height: outputHeight }
+  }, [outputHeight])
+
+  useEffect(() => {
+    if (!isDragging) return
+    const onMove = (e) => {
+      const delta = dragStart.current.y - e.clientY
+      const next  = Math.max(140, Math.min(500, dragStart.current.height + delta))
+      setOutputHeight(next)
+    }
+    const onUp = () => setIsDragging(false)
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup',  onUp)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup',  onUp)
+    }
+  }, [isDragging])
+
+  // ── Run all test cases ──
   const handleRunAll = useCallback(async () => {
     if (!problem?.testCases?.length) return
     setRunning(true)
     setOutputTab('testcases')
-    // Placeholder cards
     setTestResults(
       problem.testCases.map((tc, i) => ({
         id: i + 1, input: tc.label ?? tc.stdin,
@@ -208,14 +381,12 @@ export default function CodeEditorPane({
       const results = await runAllTestCases({ code, language, testCases: problem.testCases })
       setTestResults(results)
     } catch (err) {
-      setTestResults(
-        problem.testCases.map((tc, i) => ({
-          id: i + 1, input: tc.label ?? tc.stdin, expected: tc.expected,
-          running: false, passed: false,
-          statusId: 13, statusLabel: 'Network Error', statusType: 'error',
-          error: `Could not reach Judge0: ${err.message}`, stdout: '',
-        }))
-      )
+      setTestResults(problem.testCases.map((tc, i) => ({
+        id: i + 1, input: tc.label ?? tc.stdin, expected: tc.expected,
+        running: false, passed: false,
+        statusId: 13, statusLabel: 'Network Error', statusType: 'error',
+        error: `Could not reach Judge0 CE: ${err.message}`, stdout: '',
+      })))
     } finally {
       setRunning(false)
     }
@@ -231,7 +402,7 @@ export default function CodeEditorPane({
     } catch (err) {
       setCustomResult({
         passed: false, statusLabel: 'Network Error', statusType: 'error',
-        error: `Could not reach Judge0: ${err.message}`, stdout: '',
+        error: `Could not reach Judge0 CE: ${err.message}`, stdout: '',
       })
     } finally {
       setRunningCustom(false)
@@ -239,80 +410,139 @@ export default function CodeEditorPane({
   }, [code, language, customInput])
 
   // ── Reset ──
-  const handleReset = () => {
+  const handleReset = useCallback(() => {
     onCodeChange(starterCode)
     setTestResults([])
     setCustomResult(null)
-  }
+  }, [starterCode, onCodeChange])
 
   const allPassed = testResults.length > 0 && testResults.every((r) => r.passed && !r.running)
-  const anyFailed = testResults.some((r) => !r.passed && !r.running && r.statusId)
+  const anyFailed = !allPassed && testResults.some((r) => !r.running && r.statusId)
+  const lc        = LANG_COLORS[language] || LANG_COLORS.JavaScript
+  const lineH     = Math.round(fontSize * 1.65)
 
   return (
-    <div className="flex flex-col h-full overflow-hidden bg-gray-950">
-
-      {/* ── Toolbar ── */}
-      <div className="bg-gray-900 border-b border-gray-700/60 px-3 py-2 flex items-center justify-between flex-shrink-0 gap-2">
-        {/* Left: language switcher */}
-        <div className="flex items-center gap-2 min-w-0">
-          {showLanguageSwitcher && (
-            <div className="flex border border-gray-700 rounded-lg overflow-hidden flex-shrink-0">
-              {LANGUAGES.map((l) => (
-                <button
-                  key={l}
-                  onClick={() => !readOnly && onLanguageChange?.(l)}
-                  disabled={readOnly}
-                  className={`px-2.5 py-1 text-xs font-medium transition-colors ${
-                    language === l
-                      ? 'bg-blue-600 text-white'
-                      : 'text-gray-400 hover:text-white hover:bg-gray-700'
-                  } disabled:cursor-not-allowed`}
-                >
-                  {l}
-                </button>
-              ))}
-            </div>
-          )}
+    <div
+      ref={paneRef}
+      className="flex flex-col h-full overflow-hidden"
+      style={{ background: '#1e1e1e', fontFamily: "'JetBrains Mono', 'Fira Code', Consolas, monospace" }}
+    >
+      {/* ── Activity bar (top chrome) ── */}
+      <div
+        className="flex items-center justify-between px-3 border-b flex-shrink-0"
+        style={{ background: '#252526', borderColor: '#3a3a3a', height: 40 }}
+      >
+        {/* Left: language tabs */}
+        <div className="flex items-center gap-1 h-full overflow-x-auto no-scrollbar">
+          {showLanguageSwitcher && LANGUAGES.map((l) => {
+            const lColor = LANG_COLORS[l]
+            const active = l === language
+            return (
+              <button
+                key={l}
+                onClick={() => !readOnly && onLanguageChange?.(l)}
+                disabled={readOnly}
+                className="relative flex items-center gap-1.5 px-3 h-full text-xs font-medium transition-all flex-shrink-0 disabled:cursor-not-allowed"
+                style={{
+                  color:      active ? '#fff'           : '#858585',
+                  background: active ? '#1e1e1e'        : 'transparent',
+                  borderBottom: active ? `2px solid ${lColor?.dot || '#4d9ef0'}` : '2px solid transparent',
+                }}
+              >
+                <span
+                  className="w-2 h-2 rounded-full flex-shrink-0"
+                  style={{ background: lColor?.dot || '#888' }}
+                />
+                {l}
+              </button>
+            )
+          })}
           {readOnly && (
-            <span className="text-gray-500 text-xs flex items-center gap-1">🔒 READ-ONLY</span>
+            <span className="text-xs text-gray-600 ml-2 flex items-center gap-1">
+              🔒 READ-ONLY
+            </span>
           )}
         </div>
 
-        {/* Right: actions */}
-        <div className="flex items-center gap-2 flex-shrink-0">
+        {/* Right: controls */}
+        <div className="flex items-center gap-1.5 flex-shrink-0">
           {toolbarSlot}
+
+          {/* Font size */}
+          <div className="flex items-center gap-0.5 border border-gray-700 rounded px-1" style={{ background: '#2d2d2d' }}>
+            <button
+              onClick={() => setFontSize((s) => Math.max(10, s - 1))}
+              className="p-1 text-gray-500 hover:text-gray-200 transition-colors"
+              title="Decrease font size"
+            >
+              <Minus size={11} />
+            </button>
+            <span className="text-xs text-gray-400 w-7 text-center font-mono">{fontSize}</span>
+            <button
+              onClick={() => setFontSize((s) => Math.min(20, s + 1))}
+              className="p-1 text-gray-500 hover:text-gray-200 transition-colors"
+              title="Increase font size"
+            >
+              <Plus size={11} />
+            </button>
+          </div>
+
+          <CopyButton text={code} />
+
           {!readOnly && (
             <button
               onClick={handleReset}
-              className="flex items-center gap-1.5 text-gray-400 hover:text-white text-xs border border-gray-700 rounded-lg px-2.5 py-1.5 hover:bg-gray-700 transition-colors"
+              className="flex items-center gap-1 px-2 py-1 rounded text-xs text-gray-500 hover:text-gray-200 hover:bg-white/5 transition-colors border border-gray-700"
+              title="Reset to starter code"
             >
               <RotateCcw size={11} /> Reset
             </button>
           )}
+
           {problem?.testCases && (
             <button
               onClick={handleRunAll}
               disabled={running}
-              className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-all disabled:opacity-50"
+              style={{
+                background: running ? '#1a3a1a' : '#238636',
+                color: '#fff',
+                border: '1px solid #2ea043',
+              }}
             >
               {running
                 ? <><Loader size={11} className="animate-spin" /> Running…</>
-                : <><Play size={11} fill="white" /> Run Code</>
+                : <><Play size={11} fill="white" /> ▶ Run Code</>
               }
             </button>
           )}
         </div>
       </div>
 
-      {/* ── Code area ── */}
+      {/* ── Editor area ── */}
       <div className="flex-1 relative overflow-hidden" style={{ minHeight: 0 }}>
-        {/* Line numbers */}
+
+        {/* Gutter (line numbers) */}
         <div
-          className="absolute left-0 top-0 bottom-0 w-10 select-none pointer-events-none z-10 bg-gray-900 border-r border-gray-800"
+          className="absolute left-0 top-0 bottom-0 select-none pointer-events-none z-10 overflow-hidden"
+          style={{ width: 48, background: '#1e1e1e', borderRight: '1px solid #2d2d2d' }}
           aria-hidden="true"
         >
-          <div className="pt-4 pb-4 pr-2 font-mono text-xs text-gray-600 leading-6 text-right">
-            {code.split('\n').map((_, i) => <div key={i}>{i + 1}</div>)}
+          <div
+            className="text-right pr-3 pt-4 pb-4"
+            ref={(el) => {
+              // sync gutter scroll with textarea
+              if (!el) return
+              if (textareaRef.current) {
+                const handler = () => { el.scrollTop = textareaRef.current.scrollTop }
+                textareaRef.current.addEventListener('scroll', handler)
+              }
+            }}
+            style={{ fontFamily: 'inherit', fontSize, lineHeight: `${lineH}px`, color: '#495162' }}
+          >
+            {Array.from({ length: lineCount }, (_, i) => (
+              <div key={i} style={{ lineHeight: `${lineH}px` }}>{i + 1}</div>
+            ))}
           </div>
         </div>
 
@@ -320,11 +550,20 @@ export default function CodeEditorPane({
         <pre
           ref={highlightRef}
           aria-hidden="true"
-          className="absolute inset-0 overflow-auto pointer-events-none font-mono text-xs leading-6 pt-4 pb-4 pr-4 pl-3 m-0 bg-transparent whitespace-pre"
-          style={{ left: 40 }}
+          className="vscode-editor absolute inset-0 overflow-auto pointer-events-none m-0 whitespace-pre"
+          style={{
+            left: 48,
+            fontFamily: 'inherit',
+            fontSize,
+            lineHeight: `${lineH}px`,
+            padding: '16px 16px 16px 12px',
+            background: 'transparent',
+            color: '#abb2bf',
+          }}
         >
           <code
-            className={`language-${HLJS_LANG[language] || 'javascript'} bg-transparent`}
+            className={`language-${HLJS_LANG[language] || 'javascript'}`}
+            style={{ background: 'transparent' }}
             dangerouslySetInnerHTML={{ __html: highlighted }}
           />
         </pre>
@@ -340,20 +579,49 @@ export default function CodeEditorPane({
           spellCheck={false}
           autoCapitalize="none"
           autoCorrect="off"
-          className="absolute inset-0 font-mono text-xs leading-6 pt-4 pb-4 pr-4 pl-3 bg-transparent outline-none resize-none overflow-auto"
+          className="absolute inset-0 resize-none outline-none overflow-auto"
           style={{
-            left: 40,
-            color: 'transparent',
-            caretColor: '#e2e8f0',
+            left: 48,
+            fontFamily: 'inherit',
+            fontSize,
+            lineHeight: `${lineH}px`,
+            padding: '16px 16px 16px 12px',
+            background:  'transparent',
+            color:       'transparent',
+            caretColor:  '#aeafad',
             WebkitTextFillColor: 'transparent',
+            tabSize: 2,
           }}
         />
       </div>
 
+      {/* ── Drag divider ── */}
+      <div
+        onMouseDown={onMouseDownDivider}
+        className="flex-shrink-0 flex items-center justify-center cursor-row-resize select-none group"
+        style={{ height: 6, background: '#252526', borderTop: '1px solid #3a3a3a' }}
+      >
+        <div
+          className="w-8 h-1 rounded-full transition-colors"
+          style={{ background: isDragging ? '#4d9ef0' : '#3a3a3a' }}
+        />
+      </div>
+
       {/* ── Output panel ── */}
-      <div className="flex-shrink-0 bg-white border-t border-gray-200" style={{ height: 240 }}>
+      <div
+        className="flex-shrink-0 flex flex-col overflow-hidden"
+        style={{ height: outputHeight, background: '#1e1e1e', borderTop: '1px solid #2d2d2d' }}
+      >
+        {/* Verdict banner */}
+        {!running && testResults.length > 0 && (
+          <VerdictBanner results={testResults} />
+        )}
+
         {/* Tab bar */}
-        <div className="flex items-center gap-1 px-4 border-b border-gray-100 h-10 flex-shrink-0">
+        <div
+          className="flex items-center border-b flex-shrink-0"
+          style={{ background: '#252526', borderColor: '#3a3a3a', height: 36 }}
+        >
           {[
             { id: 'testcases', label: 'Test Cases', Icon: FlaskConical },
             { id: 'console',   label: 'Console',    Icon: Terminal },
@@ -362,29 +630,31 @@ export default function CodeEditorPane({
             <button
               key={id}
               onClick={() => setOutputTab(id)}
-              className={`flex items-center gap-1.5 h-full px-1 mr-3 text-xs font-medium border-b-2 transition-colors ${
-                outputTab === id
-                  ? 'border-blue-600 text-blue-600'
-                  : 'border-transparent text-gray-400 hover:text-gray-600'
-              }`}
+              className="flex items-center gap-1.5 px-4 h-full text-xs font-medium transition-colors relative"
+              style={{
+                color:      outputTab === id ? '#cdd6f4' : '#858585',
+                background: outputTab === id ? '#1e1e1e'  : 'transparent',
+                borderBottom: outputTab === id ? '2px solid #4d9ef0' : '2px solid transparent',
+              }}
             >
               <Icon size={12} /> {label}
             </button>
           ))}
-          {/* Summary */}
-          <div className="ml-auto flex items-center">
+
+          {/* Status summary */}
+          <div className="ml-auto px-3 flex items-center gap-3">
             {(running || runningCustom) && (
-              <span className="flex items-center gap-1 text-xs text-blue-600 font-semibold">
+              <span className="flex items-center gap-1.5 text-xs text-blue-400 font-medium">
                 <Loader size={11} className="animate-spin" /> Executing…
               </span>
             )}
             {!running && allPassed && (
-              <span className="flex items-center gap-1 text-xs font-semibold text-emerald-600">
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400">
                 <CheckCircle size={11} /> All {testResults.length} passed
               </span>
             )}
             {!running && anyFailed && (
-              <span className="flex items-center gap-1 text-xs font-semibold text-red-500">
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-red-400">
                 <XCircle size={11} />{' '}
                 {testResults.filter((r) => !r.passed && r.statusId).length} failed
               </span>
@@ -393,40 +663,53 @@ export default function CodeEditorPane({
         </div>
 
         {/* Tab content */}
-        <div className="overflow-y-auto p-4" style={{ height: 200 }}>
+        <div className="flex-1 overflow-y-auto p-3 space-y-2">
 
-          {/* Test Cases */}
+          {/* ─ Test Cases ─ */}
           {outputTab === 'testcases' && (
-            <div className="space-y-2">
-              {testResults.length === 0 && !running ? (
-                <p className="text-gray-400 text-sm">
-                  Click <strong className="text-gray-600">Run Code</strong> to execute against test cases.
-                </p>
-              ) : (
-                testResults.map((r, i) => <TestCaseCard key={i} result={r} idx={i} />)
-              )}
-            </div>
+            <>
+              {running
+                ? problem?.testCases?.map((_, i) => <SkeletonCard key={i} idx={i} />)
+                : testResults.length === 0
+                ? (
+                  <div className="flex flex-col items-center justify-center h-24 text-center">
+                    <Play size={22} className="text-gray-700 mb-2" />
+                    <p className="text-gray-500 text-sm">
+                      Press <kbd className="px-1.5 py-0.5 rounded text-xs" style={{ background: '#2d2d2d', color: '#aaa', border: '1px solid #555' }}>▶ Run Code</kbd> to execute
+                    </p>
+                  </div>
+                )
+                : testResults.map((r, i) => <TestCard key={i} result={r} idx={i} />)
+              }
+            </>
           )}
 
-          {/* Console */}
+          {/* ─ Console ─ */}
           {outputTab === 'console' && (
-            <div className="bg-gray-950 rounded-xl p-3 font-mono text-xs space-y-1" style={{ minHeight: 120 }}>
+            <div
+              className="rounded-lg p-3 font-mono text-xs leading-relaxed space-y-2"
+              style={{ background: '#0d1117', minHeight: 80 }}
+            >
               {testResults.length === 0 && !running ? (
-                <p className="text-gray-500">No output yet.</p>
+                <p style={{ color: '#484f58' }}>$ No output yet — run your code first.</p>
               ) : (
                 testResults.map((r, i) => (
                   <div key={i}>
                     {r.running ? (
-                      <p className="text-blue-400">[ case {i + 1} ] running…</p>
+                      <p style={{ color: '#58a6ff' }}>$ [ case {i + 1} ] running…</p>
                     ) : r.error ? (
                       <>
-                        <p className="text-gray-600">[ case {i + 1} ] stderr ──</p>
-                        <p className="text-red-400 whitespace-pre-wrap ml-2">{r.error}</p>
+                        <p style={{ color: '#484f58' }}>$ [ case {i + 1} ] ── stderr ──</p>
+                        <pre className="ml-3 whitespace-pre-wrap" style={{ color: '#f85149' }}>
+                          {r.error}
+                        </pre>
                       </>
                     ) : (
                       <>
-                        <p className="text-gray-600">[ case {i + 1} ] stdout ──</p>
-                        <p className="text-green-400 whitespace-pre-wrap ml-2">{r.stdout || '(no output)'}</p>
+                        <p style={{ color: '#484f58' }}>$ [ case {i + 1} ] ── stdout ──</p>
+                        <pre className="ml-3 whitespace-pre-wrap" style={{ color: '#3fb950' }}>
+                          {r.stdout || '(no output)'}
+                        </pre>
                       </>
                     )}
                   </div>
@@ -435,45 +718,68 @@ export default function CodeEditorPane({
             </div>
           )}
 
-          {/* Custom input */}
+          {/* ─ Custom Input ─ */}
           {outputTab === 'custom' && (
             <div className="space-y-3">
               <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1">
+                <label
+                  className="block text-xs font-semibold mb-1.5"
+                  style={{ color: '#858585' }}
+                >
                   Standard Input (stdin)
                 </label>
                 <textarea
                   value={customInput}
                   onChange={(e) => setCustomInput(e.target.value)}
-                  rows={3}
-                  className="w-full font-mono text-xs bg-gray-950 text-gray-300 border border-gray-800 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-                  placeholder="Enter custom test input…"
+                  rows={4}
+                  className="w-full resize-none outline-none rounded-md p-3 text-xs font-mono"
+                  style={{
+                    background:  '#0d1117',
+                    color:       '#c9d1d9',
+                    border:      '1px solid #30363d',
+                    lineHeight:  1.5,
+                  }}
+                  placeholder="Enter custom test input here…"
                 />
               </div>
               <button
                 onClick={handleRunCustom}
                 disabled={runningCustom}
-                className="flex items-center gap-1.5 bg-gray-800 text-white text-xs font-semibold px-4 py-2 rounded-lg hover:bg-gray-700 disabled:opacity-50 transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-all disabled:opacity-50"
+                style={{
+                  background: '#21262d',
+                  color:      '#c9d1d9',
+                  border:     '1px solid #30363d',
+                }}
               >
                 {runningCustom
                   ? <><Loader size={11} className="animate-spin" /> Running…</>
-                  : <><Play size={11} fill="white" /> Run Custom Input</>
+                  : <><Play size={11} fill="currentColor" /> Run Custom Input</>
                 }
               </button>
+
               {customResult && !runningCustom && (
-                <div className={`rounded-xl border p-3 font-mono text-xs space-y-1 ${
-                  customResult.error
-                    ? 'bg-red-50 border-red-200'
-                    : 'bg-emerald-50 border-emerald-200'
-                }`}>
-                  <div className="flex items-center gap-2 mb-1.5">
-                    <StatusPill result={customResult} />
-                    {customResult.time   && <span className="text-gray-400 text-xs">{customResult.time}</span>}
-                    {customResult.memory && <span className="text-gray-400 text-xs">{customResult.memory}</span>}
+                <div
+                  className="rounded-md p-3 font-mono text-xs space-y-1.5"
+                  style={{
+                    background: customResult.error ? '#1f0d0d' : '#0d1f17',
+                    border:     `1px solid ${customResult.error ? '#f8514940' : '#3fb95040'}`,
+                  }}
+                >
+                  <div className="flex items-center gap-2 mb-2">
+                    {customResult.error
+                      ? <XCircle    size={13} className="text-red-400" />
+                      : <CheckCircle size={13} className="text-emerald-400" />
+                    }
+                    <span className={`text-xs font-bold ${customResult.error ? 'text-red-400' : 'text-emerald-400'}`}>
+                      {customResult.statusLabel}
+                    </span>
+                    {customResult.time   && <span className="text-gray-500 ml-auto">{customResult.time}</span>}
+                    {customResult.memory && <span className="text-gray-500 ml-2">{customResult.memory}</span>}
                   </div>
                   {customResult.error
-                    ? <p className="text-red-600 whitespace-pre-wrap">{customResult.error}</p>
-                    : <p className="text-emerald-700 whitespace-pre-wrap">{customResult.stdout || '(no output)'}</p>
+                    ? <pre className="whitespace-pre-wrap text-red-300">{customResult.error}</pre>
+                    : <pre className="whitespace-pre-wrap text-emerald-300">{customResult.stdout || '(no output)'}</pre>
                   }
                 </div>
               )}

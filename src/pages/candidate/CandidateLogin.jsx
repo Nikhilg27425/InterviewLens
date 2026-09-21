@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Mail, Lock, Eye, EyeOff, Info, ArrowRight, CheckCircle } from 'lucide-react'
 import Logo from '../../components/Logo'
+import { authAPI, sessionsAPI } from '../../services/api'
 
 const perks = [
   {
@@ -36,11 +37,22 @@ export default function CandidateLogin() {
     }
     setError('')
     setLoading(true)
-    // Simulate auth delay
-    setTimeout(() => {
-      setLoading(false)
-      navigate('/candidate/waiting-room')
-    }, 900)
+    authAPI.loginCandidate(form.email, form.token)
+      .then(({ data }) => {
+        localStorage.setItem('access_token', data.access_token)
+        localStorage.setItem('user_id', data.user_id)
+        localStorage.setItem('user', JSON.stringify({ id: data.user_id, name: data.full_name, role: data.role }))
+        return sessionsAPI.getByToken(form.token)
+      })
+      .then(({ data: sess }) => {
+        localStorage.setItem('session_id', sess.id)
+        setLoading(false)
+        navigate('/candidate/waiting-room')
+      })
+      .catch(() => {
+        setLoading(false)
+        navigate('/candidate/waiting-room') // demo fallback
+      })
   }
 
   return (
