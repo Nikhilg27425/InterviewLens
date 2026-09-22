@@ -65,20 +65,43 @@ async def create_test_data():
                 session.add(problem)
                 await session.flush()
                 
-                # Create interview session with candidate email
+                # Get or create candidate user
+                candidate_result = await session.execute(
+                    select(User).where(User.email == candidate_email)
+                )
+                candidate_user = candidate_result.scalar_one_or_none()
+                
+                if not candidate_user:
+                    candidate_user = User(
+                        email=candidate_email,
+                        full_name="Test Candidate",
+                        role="candidate",
+                        hashed_password=None  # Candidates don't need passwords
+                    )
+                    session.add(candidate_user)
+                    await session.flush()
+                    print(f"✓ Created candidate user: {candidate_email}")
+                
+                # Create interview session linked to BOTH interviewer and candidate
                 interview_session = InterviewSession(
+                    title="Technical Interview - Full Stack Role",
                     interviewer_id=interviewer.id,
-                    problem_id=problem.id,
+                    candidate_id=candidate_user.id,  # Link to candidate user
+                    problem_ids=str(problem.id),
                     access_token=access_token,
+                    candidate_name="Test Candidate",
                     candidate_email=candidate_email,
+                    candidate_role="Full Stack Developer",
+                    duration_minutes=60,
                     status="scheduled"
                 )
                 session.add(interview_session)
                 await session.commit()
-                print(f"✓ Created candidate session: {candidate_email}")
+                print(f"✓ Created interview session: {candidate_email}")
                 print(f"  Access Token: {access_token}")
+                print(f"  Linked to interviewer: {interviewer.email}")
             else:
-                print(f"✓ Candidate session already exists: {candidate_email}")
+                print(f"✓ Interview session already exists: {candidate_email}")
                 print(f"  Access Token: {existing_session.access_token}")
                 access_token = existing_session.access_token
     

@@ -22,15 +22,23 @@ export function useInterviewSocket(sessionId) {
   const [lastMessage,  setLastMessage]  = useState(null)
 
   const connect = useCallback(() => {
-    if (!sessionId) return
+    if (!sessionId) {
+      console.log('[WebSocket] No session ID provided')
+      return
+    }
     const token = localStorage.getItem('access_token')
-    if (!token) return
+    if (!token) {
+      console.log('[WebSocket] No access token found')
+      return
+    }
 
     const url = `${WS_BASE}/ws/${sessionId}?token=${token}`
+    console.log('[WebSocket] Connecting to:', url)
     const ws  = new WebSocket(url)
     wsRef.current = ws
 
     ws.onopen = () => {
+      console.log('[WebSocket] Connected successfully')
       setConnected(true)
       reconnectCount.current = 0
     }
@@ -38,20 +46,26 @@ export function useInterviewSocket(sessionId) {
     ws.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data)
+        console.log('[WebSocket] Received message:', msg.type)
         setLastMessage(msg)
       } catch { /* ignore malformed */ }
     }
 
     ws.onclose = () => {
+      console.log('[WebSocket] Connection closed')
       setConnected(false)
       wsRef.current = null
       if (reconnectCount.current < MAX_RECONNECTS) {
         reconnectCount.current++
+        console.log(`[WebSocket] Reconnecting... (${reconnectCount.current}/${MAX_RECONNECTS})`)
         reconnectTimer.current = setTimeout(connect, RECONNECT_DELAY_MS)
       }
     }
 
-    ws.onerror = () => ws.close()
+    ws.onerror = (error) => {
+      console.error('[WebSocket] Error:', error)
+      ws.close()
+    }
   }, [sessionId])
 
   useEffect(() => {

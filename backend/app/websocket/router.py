@@ -43,6 +43,8 @@ async def websocket_endpoint(
     user_id = payload.get("sub")
     role    = payload.get("role", "candidate")
 
+    logger.info(f"WebSocket connection: user_id={user_id}, role={role}, session={session_id}")
+
     # Validate session exists
     async with AsyncSessionLocal() as db:
         sess = (await db.execute(
@@ -138,6 +140,46 @@ async def websocket_endpoint(
             # ── ping / keepalive ──
             elif msg_type == "ping":
                 await manager.send_to(websocket, {"type": "pong"})
+
+            # ── WebRTC signaling for video streaming ──
+            elif msg_type == "webrtc_offer":
+                # Candidate sends offer to interviewer
+                await manager.broadcast_to_session(
+                    session_id,
+                    {
+                        "type":   "webrtc_offer",
+                        "offer":  msg.get("offer"),
+                        "sender": user_id,
+                    },
+                    exclude=websocket,
+                )
+                logger.info(f"WebRTC offer sent from {user_id} in session {session_id}")
+
+            elif msg_type == "webrtc_answer":
+                # Interviewer sends answer back to candidate
+                await manager.broadcast_to_session(
+                    session_id,
+                    {
+                        "type":   "webrtc_answer",
+                        "answer": msg.get("answer"),
+                        "sender": user_id,
+                    },
+                    exclude=websocket,
+                )
+                logger.info(f"WebRTC answer sent from {user_id} in session {session_id}")
+
+            elif msg_type == "webrtc_ice_candidate":
+                # Exchange ICE candidates for NAT traversal
+                await manager.broadcast_to_session(
+                    session_id,
+                    {
+                        "type":      "webrtc_ice_candidate",
+                        "candidate": msg.get("candidate"),
+                        "sender":    user_id,
+                    },
+                    exclude=websocket,
+                )
+                logger.debug(f"ICE candidate exchanged in session {session_id}")
 
     except WebSocketDisconnect:
         manager.disconnect(websocket, session_id, user_id, role)

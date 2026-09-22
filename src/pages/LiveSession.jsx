@@ -9,6 +9,7 @@ import { BarChart, Bar, ResponsiveContainer, XAxis } from 'recharts'
 import CodeEditorPane from '../components/CodeEditorPane'
 import { PROBLEMS } from '../data/problems'
 import { useInterviewSocket } from '../hooks/useInterviewSocket'
+import { useWebRTC } from '../hooks/useWebRTC'
 import { sessionsAPI, signalsAPI } from '../services/api'
 
 // ─── Static seed data ─────────────────────────────────────────────────────────
@@ -97,6 +98,12 @@ export default function LiveSession() {
   const [searchParams] = useSearchParams()
   const sessionId = searchParams.get('session') || null
 
+  console.log('[LiveSession] Session ID from URL:', sessionId)
+
+  // Session data
+  const [session, setSession] = useState(null)
+  const [loading, setLoading] = useState(true)
+
   const [timeLeft,   setTimeLeft]   = useState(40 * 60 + 49)
   const [messages,   setMessages]   = useState(SEED_CHAT)
   const [inputMsg,   setInputMsg]   = useState('')
@@ -112,6 +119,43 @@ export default function LiveSession() {
 
   // ── WebSocket — receive live updates from candidate ──
   const { connected, lastMessage, send } = useInterviewSocket(sessionId)
+
+  // ── WebRTC video streaming (interviewer receives candidate's video) ──
+  const { remoteStream, connectionState } = useWebRTC(
+    send,
+    lastMessage,
+    'interviewer'
+  )
+  const remoteVideoRef = useRef(null)
+
+  // ── Display remote video stream ──
+  useEffect(() => {
+    if (remoteVideoRef.current && remoteStream) {
+      remoteVideoRef.current.srcObject = remoteStream
+    }
+  }, [remoteStream])
+
+  // ── Load session data ──
+  useEffect(() => {
+    if (!sessionId) {
+      setLoading(false)
+      return
+    }
+    
+    sessionsAPI.get(sessionId)
+      .then(({ data }) => {
+        setSession(data)
+        // Set timer based on session duration
+        if (data.duration_minutes) {
+          setTimeLeft(data.duration_minutes * 60)
+        }
+        setLoading(false)
+      })
+      .catch((err) => {
+        console.error('Failed to load session:', err)
+        setLoading(false)
+      })
+  }, [sessionId])
 
   useEffect(() => {
     if (!lastMessage) return
@@ -266,41 +310,75 @@ export default function LiveSession() {
           <div className="p-4 text-center border-b border-gray-100">
             <div className="relative inline-block mb-3">
               <div className="w-14 h-14 rounded-full bg-gradient-to-br from-blue-400 to-indigo-600 flex items-center justify-center text-white text-lg font-bold mx-auto">
-                MR
+                {session?.candidate_name?.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || 'CA'}
               </div>
-              <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-500 border-2 border-white rounded-full" />
+              <span className={`absolute bottom-0 right-0 w-3.5 h-3.5 border-2 border-white rounded-full ${
+                connectionState === 'connected' ? 'bg-green-500' : 'bg-gray-400'
+              }`} />
             </div>
-            <p className="font-bold text-gray-900 text-sm">Marcus Richardson</p>
-            <p className="text-xs text-gray-500 mt-0.5">Senior Backend Engineer</p>
+            <p className="font-bold text-gray-900 text-sm">{session?.candidate_name || 'Candidate'}</p>
+            <p className="text-xs text-gray-500 mt-0.5">{session?.candidate_role || 'Role not specified'}</p>
             <div className="flex items-center justify-center gap-1.5 mt-2">
-              <span className="bg-green-100 text-green-700 text-xs font-bold px-2 py-0.5 rounded-full">ACTIVE</span>
-              <span className="bg-gray-100 text-gray-600 text-xs font-mono px-2 py-0.5 rounded-full">9842-X</span>
+              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                session?.status === 'active' 
+                  ? 'bg-green-100 text-green-700' 
+                  : 'bg-gray-100 text-gray-600'
+              }`}>
+                {session?.status?.toUpperCase() || 'LOADING'}
+              </span>
+              {session?.access_token && (
+                <span className="bg-gray-100 text-gray-600 text-xs font-mono px-2 py-0.5 rounded-full">
+                  {session.access_token.split('-')[0]}
+                </span>
+              )}
             </div>
             <div className="grid grid-cols-2 gap-1.5 mt-3 text-left">
-              {[['STACK','Go, Node.js'],['SESSION','Algorithmic']].map(([k,v]) => (
-                <div key={k}>
-                  <p className="text-[10px] text-gray-400 font-semibold">{k}</p>
-                  <p className="text-xs font-semibold text-gray-800">{v}</p>
-                </div>
-              ))}
+              <div>
+                <p className="text-[10px] text-gray-400 font-semibold">EMAIL</p>
+                <p className="text-xs font-semibold text-gray-800 truncate">{session?.candidate_email?.split('@')[0] || '—'}</p>
+              </div>
+              <div>
+                <p className="text-[10px] text-gray-400 font-semibold">DURATION</p>
+                <p className="text-xs font-semibold text-gray-800">{session?.duration_minutes || 60} min</p>
+              </div>
             </div>
           </div>
 
           {/* Live video */}
           <div className="relative bg-gray-800">
-            <img
-              src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=300&q=80"
-              alt="Candidate feed"
-              className="w-full aspect-video object-cover opacity-80"
-            />
-            <div className="absolute top-2 left-2 bg-black/60 text-white text-[10px] font-semibold px-2 py-0.5 rounded flex items-center gap-1">
-              <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" />
-              LIVE
-            </div>
-            <div className="absolute bottom-1.5 left-2">
-              <p className="text-white text-xs font-semibold">Marcus Richardson</p>
-              <p className="text-gray-300 text-[10px]">Latency: 42ms</p>
-            </div>
+            {remoteStream ? (
+              <>
+                <video
+                  ref={remoteVideoRef}
+                  autoPlay
+                  playsInline
+                  className="w-full aspect-video object-cover"
+                />
+                <div className="absolute top-2 left-2 bg-black/60 text-white text-[10px] font-semibold px-2 py-0.5 rounded flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" />
+                  LIVE
+                </div>
+                <div className="absolute top-2 right-2 bg-black/60 text-white text-[10px] font-semibold px-2 py-0.5 rounded">
+                  {connectionState}
+                </div>
+                <div className="absolute bottom-1.5 left-2">
+                  <p className="text-white text-xs font-semibold">
+                    {session?.candidate_name || 'Candidate'}
+                  </p>
+                  <p className="text-gray-300 text-[10px]">
+                    WebRTC: {connectionState}
+                  </p>
+                </div>
+              </>
+            ) : (
+              <div className="w-full aspect-video flex items-center justify-center bg-gray-700">
+                <div className="text-center">
+                  <div className="w-12 h-12 border-4 border-gray-500 border-t-gray-300 rounded-full animate-spin mx-auto mb-3" />
+                  <p className="text-white text-sm">Connecting to candidate...</p>
+                  <p className="text-gray-400 text-xs mt-1">{connectionState}</p>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Engagement */}

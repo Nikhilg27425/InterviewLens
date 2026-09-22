@@ -10,6 +10,7 @@ import CodeEditorPane from '../../components/CodeEditorPane'
 import { PROBLEMS } from '../../data/problems'
 import { useProctoring } from '../../hooks/useProctoring'
 import { useInterviewSocket } from '../../hooks/useInterviewSocket'
+import { useWebRTC } from '../../hooks/useWebRTC'
 import { analyticsAPI, submissionsAPI } from '../../services/api'
 
 // Get session context from localStorage (set at candidate login)
@@ -141,6 +142,14 @@ export default function CandidateInterviewPage() {
   // ── WebSocket connection ──
   const { connected, lastMessage, send } = useInterviewSocket(SESSION_ID)
 
+  // ── WebRTC video streaming ──
+  const { localStream, startVideo, stopVideo, connectionState } = useWebRTC(
+    send,
+    lastMessage,
+    'candidate'
+  )
+  const videoRef = useRef(null)
+
   // ── Proctoring ──
   const { signals: procSignals } = useProctoring({
     sessionId: SESSION_ID,
@@ -177,6 +186,37 @@ export default function CandidateInterviewPage() {
     const t = setInterval(() => setTimeLeft((s) => (s > 0 ? s - 1 : 0)), 1000)
     return () => clearInterval(t)
   }, [])
+
+  // ── Start camera when interview begins ──
+  const cameraStarted = useRef(false)
+  useEffect(() => {
+    if (!SESSION_ID || cameraStarted.current) {
+      return // Don't start camera without a session or if already started
+    }
+    
+    console.log('Starting camera for session:', SESSION_ID)
+    cameraStarted.current = true
+    
+    startVideo().catch(err => {
+      console.error('Failed to start camera:', err)
+      cameraStarted.current = false
+      // Show error to user (could add a toast notification here)
+    })
+
+    return () => {
+      console.log('Stopping camera on unmount')
+      stopVideo()
+      cameraStarted.current = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [SESSION_ID]) // Only run when SESSION_ID changes
+
+  // ── Display local video stream ──
+  useEffect(() => {
+    if (videoRef.current && localStream) {
+      videoRef.current.srcObject = localStream
+    }
+  }, [localStream])
 
   const fmt = (s) => {
     const m = Math.floor(s / 60).toString().padStart(2, '0')
@@ -474,6 +514,28 @@ export default function CandidateInterviewPage() {
           <p className="text-xs text-gray-400 mt-3 leading-relaxed">
             Code is executed on Judge0 CE. Results reflect actual runtime output.
           </p>
+        </div>
+      )}
+
+      {/* ── Camera preview (small pip in corner) ── */}
+      {localStream && (
+        <div className="fixed bottom-4 right-4 z-50">
+          <div className="relative w-40 h-30 bg-black rounded-xl overflow-hidden shadow-lg border-2 border-gray-300">
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              className="w-full h-full object-cover"
+            />
+            <div className="absolute top-2 left-2 bg-red-500 text-white text-xs px-2 py-0.5 rounded-full flex items-center gap-1">
+              <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
+              REC
+            </div>
+            <div className="absolute bottom-2 left-2 text-white text-[10px] bg-black/50 px-2 py-0.5 rounded">
+              {connectionState === 'connected' ? '● Live' : connectionState}
+            </div>
+          </div>
         </div>
       )}
     </div>
