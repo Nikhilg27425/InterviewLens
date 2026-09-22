@@ -3,9 +3,11 @@ import { Link, useNavigate } from 'react-router-dom'
 import { Mail, Lock, Eye, EyeOff, Info } from 'lucide-react'
 import Logo from '../components/Logo'
 import { authAPI } from '../services/api'
+import { useAuth } from '../contexts/AuthContext'
 
 export default function LoginPage() {
   const navigate = useNavigate()
+  const { login } = useAuth()
   const [showPassword, setShowPassword] = useState(false)
   const [remember, setRemember] = useState(false)
   const [form, setForm] = useState({ email: '', password: '' })
@@ -19,10 +21,14 @@ export default function LoginPage() {
     
     authAPI.loginInterviewer(form.email, form.password)
       .then(({ data }) => {
-        localStorage.setItem('access_token', data.access_token)
-        localStorage.setItem('user', JSON.stringify({ id: data.user_id, name: data.full_name, role: data.role }))
+        // Use the AuthContext login function
+        login(data.access_token, { 
+          id: data.user_id, 
+          name: data.full_name, 
+          role: data.role 
+        })
         setLoading(false)
-        navigate('/dashboard')
+        navigate('/dashboard', { replace: true })
       })
       .catch((err) => {
         setLoading(false)

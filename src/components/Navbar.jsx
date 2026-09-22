@@ -2,10 +2,18 @@ import React, { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Bell, HelpCircle, Search, ChevronDown } from 'lucide-react'
 import Logo from './Logo'
+import { useAuth } from '../contexts/AuthContext'
 
 export default function Navbar() {
   const navigate = useNavigate()
+  const { logout } = useAuth()
   const [dropdownOpen, setDropdownOpen] = useState(false)
+
+  const handleSignOut = () => {
+    setDropdownOpen(false)
+    logout()
+    navigate('/login', { replace: true })
+  }
 
   return (
     <header className="fixed top-0 left-0 right-0 z-50 h-14 bg-white border-b border-gray-200 flex items-center px-4 gap-4">
@@ -62,7 +70,7 @@ export default function Navbar() {
               <hr className="my-1 border-gray-100" />
               <button
                 className="w-full text-left px-4 py-2 text-sm text-red-500 hover:bg-gray-50"
-                onClick={() => navigate('/login')}
+                onClick={handleSignOut}
               >
                 Sign Out
               </button>

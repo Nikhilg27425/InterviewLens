@@ -179,7 +179,7 @@ export default function CandidateWaitingRoom() {
           }
           
         } else if (id === 'mic') {
-          // Check microphone access AND verify it can actually record audio
+          // Check microphone access AND verify it can actually capture audio
           try {
             const stream = await navigator.mediaDevices.getUserMedia({ 
               audio: {
@@ -201,44 +201,45 @@ export default function CandidateWaitingRoom() {
               throw new Error('Audio track not live')
             }
             
-            // Test recording for 1 second to ensure it actually works
-            const mediaRecorder = new MediaRecorder(stream)
-            let recordedData = []
+            // Use AudioContext to verify actual audio signal
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)()
+            const analyser = audioContext.createAnalyser()
+            const microphone = audioContext.createMediaStreamSource(stream)
+            analyser.fftSize = 256
+            const bufferLength = analyser.frequencyBinCount
+            const dataArray = new Uint8Array(bufferLength)
             
-            await new Promise((resolve, reject) => {
-              const timeout = setTimeout(() => reject(new Error('Recording timeout')), 3000)
-              
-              mediaRecorder.ondataavailable = (e) => {
-                if (e.data && e.data.size > 0) {
-                  recordedData.push(e.data)
-                }
-              }
-              
-              mediaRecorder.onstop = () => {
-                clearTimeout(timeout)
-                resolve()
-              }
-              
-              mediaRecorder.onerror = (e) => {
-                clearTimeout(timeout)
-                reject(e)
-              }
-              
-              mediaRecorder.start()
-              setTimeout(() => {
-                if (mediaRecorder.state === 'recording') {
-                  mediaRecorder.stop()
-                }
-              }, 1000)
-            })
+            microphone.connect(analyser)
             
-            // Verify we actually recorded something
-            if (recordedData.length === 0) {
-              throw new Error('No audio data recorded')
+            // Check for audio signal over 1 second
+            let maxLevel = 0
+            const checkAudioLevel = () => {
+              analyser.getByteFrequencyData(dataArray)
+              const average = dataArray.reduce((a, b) => a + b) / bufferLength
+              if (average > maxLevel) maxLevel = average
             }
             
-            // Stop all tracks
+            await new Promise((resolve) => {
+              const interval = setInterval(checkAudioLevel, 50)
+              setTimeout(() => {
+                clearInterval(interval)
+                resolve()
+              }, 1500)
+            })
+            
+            // Clean up
+            microphone.disconnect()
+            audioContext.close()
             stream.getTracks().forEach(track => track.stop())
+            
+            // Verify we detected some audio activity (threshold: 5 out of 255)
+            // This detects ambient noise or user making sound
+            if (maxLevel < 5) {
+              console.warn('Microphone permission granted but no audio signal detected')
+              // We'll still pass if permission is granted and device is working
+              // since user might be in a quiet environment
+            }
+            
             passed = true
           } catch (error) {
             console.error('Microphone check failed:', error)
@@ -254,44 +255,59 @@ export default function CandidateWaitingRoom() {
           if (!navigator.onLine) {
             passed = false
           } else {
-            // Test actual network speed by downloading a small file
             try {
-              const startTime = performance.now()
+              // Test 1: Check latency with multiple fallback URLs
+              const testUrls = [
+                'https://www.google.com/favicon.ico',
+                'https://cdn.jsdelivr.net/npm/react/package.json',
+                'https://unpkg.com/react/package.json'
+              ]
               
-              // Use a tiny file from a CDN to test speed (1KB test)
-              const testUrl = 'https://www.google.com/favicon.ico'
-              const response = await fetch(testUrl, { 
-                cache: 'no-cache',
-                method: 'HEAD'  // Just get headers, don't download body
-              })
+              let latencyPassed = false
               
-              const endTime = performance.now()
-              const latency = endTime - startTime
+              for (const testUrl of testUrls) {
+                try {
+                  const startTime = performance.now()
+                  const response = await fetch(testUrl, { 
+                    cache: 'no-cache',
+                    mode: 'no-cors' // Avoid CORS issues
+                  })
+                  const endTime = performance.now()
+                  const latency = endTime - startTime
+                  
+                  // Latency should be reasonable (< 3000ms)
+                  if (latency < 3000) {
+                    latencyPassed = true
+                    break
+                  }
+                } catch (err) {
+                  console.warn(`Failed to test ${testUrl}:`, err)
+                  continue
+                }
+              }
               
-              // Check if request succeeded
-              if (!response.ok) {
+              if (!latencyPassed) {
                 passed = false
               } else {
-                // Latency should be reasonable (< 2000ms for HEAD request)
-                if (latency > 2000) {
-                  passed = false
-                } else {
-                  // Check connection info if available
-                  if (navigator.connection) {
-                    const connection = navigator.connection
-                    // Require at least 1 Mbps (downlink in Mbps)
-                    const downlink = connection.downlink || connection.bandwidth || 0
-                    
-                    if (downlink > 0 && downlink < 1) {
-                      passed = false
-                    } else {
-                      // Connection is fast enough or we can't detect speed
-                      passed = true
-                    }
+                // Test 2: Check connection speed using Network Information API
+                if (navigator.connection) {
+                  const connection = navigator.connection
+                  const downlink = connection.downlink || 0
+                  const effectiveType = connection.effectiveType || ''
+                  
+                  // Require at least 1 Mbps downlink OR effective type of 3g or better
+                  if (downlink > 0) {
+                    passed = downlink >= 1
+                  } else if (effectiveType) {
+                    // Accept 3g, 4g, or better
+                    passed = ['4g', '3g'].includes(effectiveType)
                   } else {
-                    // Can't detect speed but latency is good
+                    // Can't determine speed, but latency was acceptable
                     passed = true
                   }
+                } else {
+                  // Network Information API not available, but latency was good
+                  passed = true
                 }
               }
             } catch (error) {

@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import Logo from '../components/Logo'
+import { useAuth } from '../contexts/AuthContext'
 
 export default function OAuthCallback() {
   const navigate = useNavigate()
+  const { login } = useAuth()
   const [searchParams] = useSearchParams()
   const [error, setError] = useState('')
 
@@ -30,16 +32,15 @@ export default function OAuthCallback() {
       }
 
       try {
-        // Store authentication data
-        localStorage.setItem('access_token', token)
-        localStorage.setItem('user', JSON.stringify({ 
+        // Use AuthContext login function
+        login(token, { 
           id: userId, 
           name: fullName, 
           role: role 
-        }))
+        })
         
         // Redirect to dashboard
-        navigate('/dashboard')
+        navigate('/dashboard', { replace: true })
       } catch (err) {
         console.error('Error storing auth data:', err)
         setError('Authentication failed. Please try again.')
@@ -48,7 +49,7 @@ export default function OAuthCallback() {
     }
 
     handleCallback()
-  }, [searchParams, navigate])
+  }, [searchParams, navigate, login])
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
