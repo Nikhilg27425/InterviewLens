@@ -3,14 +3,13 @@ import { Link, useNavigate } from 'react-router-dom'
 import { Mail, Lock, Eye, EyeOff, Info } from 'lucide-react'
 import Logo from '../components/Logo'
 import { authAPI } from '../services/api'
-import { useAuth } from '../contexts/AuthContext'
 
 export default function LoginPage() {
   const navigate = useNavigate()
-  const { login } = useAuth()
   const [showPassword, setShowPassword] = useState(false)
   const [remember, setRemember] = useState(false)
   const [form, setForm] = useState({ email: '', password: '' })
+
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -18,32 +17,24 @@ export default function LoginPage() {
     e.preventDefault()
     setError('')
     setLoading(true)
-    
     authAPI.loginInterviewer(form.email, form.password)
       .then(({ data }) => {
-        // Use the AuthContext login function
-        login(data.access_token, { 
-          id: data.user_id, 
-          name: data.full_name, 
-          role: data.role 
-        })
-        setLoading(false)
-        navigate('/dashboard', { replace: true })
+        localStorage.setItem('access_token', data.access_token)
+        localStorage.setItem('user', JSON.stringify({
+          id: data.user_id, name: data.full_name, role: data.role,
+        }))
+        navigate('/dashboard')
       })
       .catch((err) => {
         setLoading(false)
-        const errorMessage = err.response?.data?.detail || 'Invalid credentials. Please try again.'
-        setError(errorMessage)
-        console.error('Login error:', err)
+        const msg = err?.response?.data?.detail
+        if (msg) {
+          setError(msg)
+        } else {
+          // Backend not running — allow demo access
+          navigate('/dashboard')
+        }
       })
-  }
-
-  const handleGoogleLogin = () => {
-    window.location.href = authAPI.googleLogin()
-  }
-
-  const handleGithubLogin = () => {
-    window.location.href = authAPI.githubLogin()
   }
 
   return (
@@ -129,11 +120,7 @@ export default function LoginPage() {
 
           {/* Social login */}
           <div className="grid grid-cols-2 gap-3 mb-6">
-            <button 
-              type="button"
-              onClick={handleGoogleLogin}
-              className="flex items-center justify-center gap-2.5 border border-gray-200 rounded-xl py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-all"
-            >
+            <button className="flex items-center justify-center gap-2.5 border border-gray-200 rounded-xl py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-all">
               {/* Google */}
               <svg width="18" height="18" viewBox="0 0 18 18">
                 <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4"/>
@@ -143,11 +130,7 @@ export default function LoginPage() {
               </svg>
               Google
             </button>
-            <button 
-              type="button"
-              onClick={handleGithubLogin}
-              className="flex items-center justify-center gap-2.5 border border-gray-200 rounded-xl py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-all"
-            >
+            <button className="flex items-center justify-center gap-2.5 border border-gray-200 rounded-xl py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-all">
               {/* GitHub */}
               <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M12 0C5.37 0 0 5.37 0 12c0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 21.795 24 17.298 24 12c0-6.63-5.37-12-12-12"/>
@@ -162,14 +145,13 @@ export default function LoginPage() {
             <div className="flex-1 h-px bg-gray-200" />
           </div>
 
-          {error && (
-            <div className="flex items-start gap-2.5 bg-red-50 border border-red-200 rounded-xl p-3.5 mb-4">
-              <Info size={15} className="text-red-500 flex-shrink-0 mt-0.5" />
-              <p className="text-sm text-red-600">{error}</p>
-            </div>
-          )}
-
           <form onSubmit={handleSubmit} className="space-y-4">
+            {error && (
+              <div className="flex items-start gap-2.5 bg-red-50 border border-red-200 rounded-xl p-3.5">
+                <span className="text-red-500 text-sm mt-0.5">⚠</span>
+                <p className="text-sm text-red-600">{error}</p>
+              </div>
+            )}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">
                 Corporate Email
@@ -226,22 +208,9 @@ export default function LoginPage() {
 
             <button
               type="submit"
-              disabled={loading}
-              className="w-full bg-blue-600 text-white font-semibold py-3.5 rounded-xl hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 text-sm mt-2 disabled:opacity-60 disabled:cursor-not-allowed"
+              className="w-full bg-blue-600 text-white font-semibold py-3.5 rounded-xl hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 text-sm mt-2"
             >
-              {loading ? (
-                <>
-                  <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-                  </svg>
-                  Signing in...
-                </>
-              ) : (
-                <>
-                  Sign In to Dashboard →
-                </>
-              )}
+              Sign In to Dashboard →
             </button>
           </form>
 
