@@ -9,6 +9,7 @@ import {
 } from 'recharts'
 import { sessionsAPI, analyticsAPI, signalsAPI, submissionsAPI } from '../services/api'
 import { loadSessionProblems } from '../services/problems'
+import InviteControls from '../components/InviteControls'
 
 const tabs = ['Evaluation', 'Submissions', 'Similarity Analysis']
 
@@ -420,8 +421,17 @@ export default function InterviewDetails() {
           </div>
         </div>
 
-        {/* Right: signals */}
+        {/* Right: invite + signals */}
         <div className="space-y-5">
+          {session.candidate_email && (
+            <div className="bg-white rounded-2xl border border-gray-100 p-5">
+              <h2 className="font-semibold text-gray-900 mb-1">Candidate access</h2>
+              <p className="text-xs text-gray-400 mb-3">
+                {session.candidate_email} · token <span className="font-mono">{session.access_token}</span>
+              </p>
+              <InviteControls session={session} onSessionChange={setSession} />
+            </div>
+          )}
           <div className="bg-white rounded-2xl border border-gray-100 p-5">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">

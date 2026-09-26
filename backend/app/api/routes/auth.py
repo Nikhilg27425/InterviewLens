@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_
+from sqlalchemy import select, or_, func
 from starlette.responses import RedirectResponse
 import httpx
 from urllib.parse import urlencode
@@ -10,7 +10,10 @@ from app.models.user import User, UserRole
 from app.models.session import InterviewSession, SessionStatus
 from app.core.security import hash_password, verify_password, create_access_token
 from app.core.config import settings
-from app.schemas.user import UserCreate, UserLogin, CandidateLogin, TokenResponse, UserOut, CandidateCreate
+from app.schemas.user import (
+    UserCreate, UserLogin, CandidateLogin, TokenResponse, UserOut, CandidateCreate,
+    ProfileUpdate, PasswordChange,
+)
 from app.api.deps import get_current_user
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -20,12 +23,13 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 @router.post("/register", response_model=UserOut, status_code=201)
 async def register_interviewer(body: UserCreate, db: AsyncSession = Depends(get_db)):
-    existing = (await db.execute(select(User).where(User.email == body.email))).scalar_one_or_none()
+    email = body.email.strip().lower()
+    existing = (await db.execute(select(User).where(func.lower(User.email) == email))).scalar_one_or_none()
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
 
     user = User(
-        email=body.email,
+        email=email,
         full_name=body.full_name,
         hashed_password=hash_password(body.password),
         role=body.role,
@@ -40,14 +44,19 @@ async def register_interviewer(body: UserCreate, db: AsyncSession = Depends(get_
 
 @router.post("/login", response_model=TokenResponse)
 async def login_interviewer(body: UserLogin, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(User).where(User.email == body.email))
+    result = await db.execute(select(User).where(func.lower(User.email) == body.email.strip().lower()))
     user = result.scalar_one_or_none()
-    
+
     if not user:
         raise HTTPException(status_code=401, detail="Invalid credentials")
     
+    if user.role == UserRole.candidate:
+        raise HTTPException(status_code=403, detail="Candidates sign in through the candidate portal with their access token.")
+
     # Check if user is OAuth-only (no password set)
     if user.hashed_password is None:
+        if not user.oauth_provider:
+            raise HTTPException(status_code=401, detail="Invalid credentials")
         raise HTTPException(
             status_code=400, 
             detail=f"This account uses {user.oauth_provider} sign-in. Please use the {user.oauth_provider.title()} button to log in."
@@ -75,9 +84,11 @@ async def login_interviewer(body: UserLogin, db: AsyncSession = Depends(get_db))
 
 @router.post("/candidate/login", response_model=TokenResponse)
 async def login_candidate(body: CandidateLogin, db: AsyncSession = Depends(get_db)):
+    email = body.email.strip().lower()
+    access_token = body.access_token.strip().upper()
     # Verify session token exists and is not completed/cancelled
     sess_result = await db.execute(
-        select(InterviewSession).where(InterviewSession.access_token == body.access_token)
+        select(InterviewSession).where(InterviewSession.access_token == access_token)
     )
     session = sess_result.scalar_one_or_none()
     if not session:
@@ -86,22 +97,22 @@ async def login_candidate(body: CandidateLogin, db: AsyncSession = Depends(get_d
         raise HTTPException(status_code=410, detail="Session is no longer active")
 
     # SECURITY FIX: Verify email matches the session's intended candidate email
-    if session.candidate_email and session.candidate_email.lower() != body.email.lower():
+    if session.candidate_email and session.candidate_email.lower() != email:
         raise HTTPException(
             status_code=403, 
             detail=f"This session is assigned to {session.candidate_email}. Please use the correct email address."
         )
 
     # Get or create candidate user
-    user_result = await db.execute(select(User).where(User.email == body.email))
+    user_result = await db.execute(select(User).where(func.lower(User.email) == email))
     user = user_result.scalar_one_or_none()
 
     if not user:
         # Auto-create candidate account on first login
         user = User(
-            email=body.email,
-            full_name=session.candidate_name or body.email.split("@")[0],
-            hashed_password=hash_password(body.access_token),  # token is the initial password
+            email=email,
+            full_name=session.candidate_name or email.split("@")[0],
+            hashed_password=None,  # candidates authenticate with email + session token only
             role=UserRole.candidate,
         )
         db.add(user)
@@ -148,6 +159,33 @@ async def login_candidate(body: CandidateLogin, db: AsyncSession = Depends(get_d
 @router.get("/me", response_model=UserOut)
 async def me(current_user: User = Depends(get_current_user)):
     return current_user
+
+
+@router.patch("/me", response_model=UserOut)
+async def update_me(
+    body: ProfileUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    for field, value in body.model_dump(exclude_unset=True).items():
+        setattr(current_user, field, value or None if field == "company" else value)
+    await db.flush()
+    await db.refresh(current_user)
+    return current_user
+
+
+@router.post("/change-password", status_code=204)
+async def change_password(
+    body: PasswordChange,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.role == UserRole.candidate:
+        raise HTTPException(status_code=403, detail="Candidates don't have passwords")
+    if current_user.hashed_password and not verify_password(body.current_password or "", current_user.hashed_password):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    current_user.hashed_password = hash_password(body.new_password)
+    await db.flush()
 
 
 # ── OAuth: Google Login ───────────────────────────────────────────────────────

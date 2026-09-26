@@ -8,6 +8,7 @@ import {
 import { BarChart, Bar, ResponsiveContainer, XAxis } from 'recharts'
 import CodeEditorPane from '../components/CodeEditorPane'
 import NewSessionModal from '../components/NewSessionModal'
+import InviteControls from '../components/InviteControls'
 import { useInterviewSocket } from '../hooks/useInterviewSocket'
 import { useWebRTC } from '../hooks/useWebRTC'
 import { sessionsAPI, signalsAPI } from '../services/api'
@@ -170,18 +171,33 @@ function LiveSessionView({ sessionId }) {
 
   const problemsRef = useRef(problems)
   problemsRef.current = problems
+  // Code that arrives before the problem list has loaded (e.g. the candidate's
+  // catch-up burst when we connect) is held here and applied once it loads
+  const pendingCode = useRef([])
+
+  const applyCodeUpdate = useCallback((msg) => {
+    const idx = problemsRef.current.findIndex((p) => String(p.id) === String(msg.problem_id))
+    if (idx < 0 || msg.code == null) return
+    const pid = problemsRef.current[idx].id
+    setCodes((prev) => ({ ...prev, [pid]: { ...prev[pid], [msg.language]: msg.code } }))
+    setProblemIdx(idx)
+    if (msg.language) setLang(msg.language)
+  }, [])
+
+  useEffect(() => {
+    if (!problems.length || !pendingCode.current.length) return
+    const queued = pendingCode.current
+    pendingCode.current = []
+    queued.forEach(applyCodeUpdate)
+  }, [problems, applyCodeUpdate])
 
   useEffect(() => subscribe((msg) => {
     switch (msg.type) {
       case 'code_update': {
         setCandidateOnline(true)
         activityCount.current++
-        const idx = problemsRef.current.findIndex((p) => String(p.id) === String(msg.problem_id))
-        if (idx < 0 || msg.code == null) return
-        const pid = problemsRef.current[idx].id
-        setCodes((prev) => ({ ...prev, [pid]: { ...prev[pid], [msg.language]: msg.code } }))
-        setProblemIdx(idx)
-        if (msg.language) setLang(msg.language)
+        if (!problemsRef.current.length) pendingCode.current.push(msg)
+        else applyCodeUpdate(msg)
         return
       }
       case 'signal':
@@ -234,7 +250,7 @@ function LiveSessionView({ sessionId }) {
         return
       default:
     }
-  }), [subscribe, addCard, sessionId])
+  }), [subscribe, addCard, sessionId, applyCodeUpdate])
 
   useEffect(() => {
     if (connectionState === 'connected') setCandidateOnline(true)
@@ -436,6 +452,11 @@ function LiveSessionView({ sessionId }) {
               {session.access_token}
               {copied ? <Check size={11} className="text-emerald-600" /> : <Copy size={11} />}
             </button>
+            {['scheduled', 'waiting'].includes(session.status) && session.candidate_email && (
+              <div className="mt-3 text-left">
+                <InviteControls session={session} onSessionChange={setSession} compact />
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-1.5 mt-3 text-left">
               <div className="min-w-0">
                 <p className="text-[10px] text-gray-400 font-semibold">EMAIL</p>

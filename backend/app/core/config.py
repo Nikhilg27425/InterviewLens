@@ -23,6 +23,16 @@ class Settings(BaseSettings):
     OAUTH_REDIRECT_URI: str = "http://localhost:5173/auth/callback"
     FRONTEND_URL: str = "http://localhost:5173"
 
+    # Email (candidate invites). Leave SMTP_HOST empty to write emails to
+    # EMAIL_OUTBOX_DIR instead of sending them — handy for local development.
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_USE_TLS: bool = True          # STARTTLS on 587; set False and use port 465 for implicit SSL
+    EMAIL_FROM: str = "InterviewLens <no-reply@interviewlens.local>"
+    EMAIL_OUTBOX_DIR: str = "outbox"
+
     @property
     def cors_origins_list(self) -> List[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",")]

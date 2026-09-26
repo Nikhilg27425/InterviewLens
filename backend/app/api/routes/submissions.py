@@ -9,7 +9,7 @@ from app.db.base import get_db
 from app.models.session import InterviewSession, SessionStatus
 from app.models.problem import Problem
 from app.models.submission import Submission
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.schemas.submission import RunRequest, RunResponse, TestCaseResult, SubmissionOut
 from app.services import judge0 as j0
 from app.api.deps import get_current_user, get_session_for_user
@@ -39,7 +39,7 @@ async def run_code(
 
     # Only run non-hidden test cases for "run" (not final submit)
     visible_cases = [
-        {"label": tc.label, "stdin": tc.stdin, "expected": tc.expected}
+        {"label": tc.label, "stdin": tc.stdin, "expected": tc.expected, "is_hidden": tc.is_hidden}
         for tc in sorted(prob.test_cases, key=lambda t: t.order_index)
         if not (tc.is_hidden and not body.is_final)
     ]
@@ -90,22 +90,23 @@ async def run_code(
         },
     )
 
-    results = [
-        TestCaseResult(
+    mask = current_user.role == UserRole.candidate
+    results = []
+    for r, tc in zip(raw_results, visible_cases):
+        hidden = mask and tc["is_hidden"]
+        results.append(TestCaseResult(
             id=r["id"],
-            input=r["input"],
-            expected=r.get("expected", ""),
-            stdout=r.get("stdout", ""),
-            stderr=r.get("stderr", ""),
+            input="Hidden test case" if hidden else r["input"],
+            expected="" if hidden else r.get("expected", ""),
+            stdout="" if hidden else r.get("stdout", ""),
+            stderr="" if hidden else r.get("stderr", ""),
             compile_error=r.get("compile_error", ""),
             passed=r["passed"],
             status_label=r["status_label"],
             status_type=r["status_type"],
             time=r.get("time"),
             memory=r.get("memory"),
-        )
-        for r in raw_results
-    ]
+        ))
 
     return RunResponse(
         submission_id=sub.id,

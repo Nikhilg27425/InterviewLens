@@ -14,6 +14,12 @@ import { analyticsAPI, candidateSession, sessionsAPI, submissionsAPI } from '../
 import { loadSessionProblems } from '../../services/problems'
 
 const SNAPSHOT_INTERVAL_MS = 30000
+const TIME_WARNINGS = [60, 300, 600]  // seconds remaining, tightest first
+const draftKey = (sessionId) => `interviewlens:draft:${sessionId}`
+
+function loadDraft(sessionId) {
+  try { return JSON.parse(localStorage.getItem(draftKey(sessionId))) || null } catch { return null }
+}
 const CODE_SYNC_DEBOUNCE_MS = 300
 
 // Map a /submissions/run test result onto the editor's result shape
@@ -116,7 +122,7 @@ function ProblemPanel({ problem, index }) {
         ))}
 
         {/* Constraints */}
-        <div>
+        {problem.constraints.length > 0 && <div>
           <p className="text-sm font-semibold text-gray-900 mb-2">Constraints:</p>
           <ul className="space-y-1.5">
             {problem.constraints.map((c, i) => (
@@ -126,7 +132,7 @@ function ProblemPanel({ problem, index }) {
               </li>
             ))}
           </ul>
-        </div>
+        </div>}
       </div>
     </div>
   )
@@ -156,7 +162,11 @@ function InterviewWorkspace({ sessionId }) {
   const [submitting, setSubmitting]     = useState(false)
   const [submitError, setSubmitError]   = useState('')
   const [showHelp, setShowHelp]         = useState(false)
-  const [interviewerMsgs, setInterviewerMsgs] = useState([])
+  const [messages, setMessages]         = useState([])
+  const [chatOpen, setChatOpen]         = useState(false)
+  const [unread, setUnread]             = useState(0)
+  const [chatInput, setChatInput]       = useState('')
+  const [timeWarning, setTimeWarning]   = useState(null)
 
   const problem = problems[currentIdx]
   const TOTAL = (session?.duration_minutes || 60) * 60
@@ -176,7 +186,14 @@ function InterviewWorkspace({ sessionId }) {
         if (cancelled) return
         setSession(sess)
         setProblems(probs)
-        setCodes(Object.fromEntries(probs.map((p) => [p.id, { ...p.starterCode }])))
+        // Restore unsaved work from this browser (refresh / accidental close)
+        const draft = loadDraft(sessionId)
+        setCodes(Object.fromEntries(probs.map((p) => [
+          p.id, { ...p.starterCode, ...(draft?.codes?.[p.id] || {}) },
+        ])))
+        if (draft?.lang) setLang(draft.lang)
+        if (draft?.currentIdx != null && draft.currentIdx < probs.length) setCurrentIdx(draft.currentIdx)
+        if (draft?.solved) setSolved(draft.solved)
       } catch (err) {
         if (!cancelled) setLoadError(err.response?.data?.detail || 'Could not load your interview.')
       }
@@ -214,19 +231,78 @@ function InterviewWorkspace({ sessionId }) {
     enabled: !!session,
   })
 
+  // Latest values for timers/handlers without re-arming them every render
+  const latest = useRef({})
+  latest.current = { problem, problems, lang, codes, elapsed, chatOpen }
+
+  // ── Persist work locally so a refresh never loses code ──
+  useEffect(() => {
+    if (!problems.length) return
+    try {
+      localStorage.setItem(draftKey(sessionId), JSON.stringify({ codes, lang, currentIdx, solved }))
+    } catch { /* storage full or disabled */ }
+  }, [codes, lang, currentIdx, solved, problems.length, sessionId])
+
+  const pushMessage = useCallback((from, text) => {
+    setMessages((prev) => [...prev, {
+      id: `${Date.now()}-${Math.random()}`, from, text,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    }])
+  }, [])
+
+  // Bring an interviewer who joins late fully up to date: every problem's code,
+  // ending on the one the candidate is looking at
+  const resyncInterviewer = useCallback(() => {
+    const { problem: current, problems: all, lang: l, codes: c } = latest.current
+    if (!current) return
+    for (const p of all) {
+      if (p.id !== current.id && c[p.id]?.[l] !== p.starterCode[l]) {
+        send({ type: 'code_update', problem_id: p.id, language: l, code: c[p.id]?.[l] ?? '' })
+      }
+    }
+    send({ type: 'code_update', problem_id: current.id, language: l, code: c[current.id]?.[l] ?? '' })
+  }, [send])
+
   // ── Messages from the interviewer ──
   useEffect(() => subscribe((msg) => {
     if (msg.type === 'chat' && msg.role !== 'candidate') {
-      setInterviewerMsgs((prev) => [...prev.slice(-4), { id: Date.now(), text: msg.text }])
+      pushMessage('interviewer', msg.text)
+      if (!latest.current.chatOpen) setUnread((n) => n + 1)
+      setChatOpen(true)
+    }
+    if ((msg.type === 'user_joined' && msg.role === 'interviewer') || msg.type === 'webrtc_request') {
+      resyncInterviewer()
     }
     if (msg.type === 'session_ended') {
       navigate('/candidate/submitted', { replace: true })
     }
-  }), [subscribe, navigate])
+  }), [subscribe, navigate, pushMessage, resyncInterviewer])
 
-  // Latest values for timers/debounces without re-arming them every render
-  const latest = useRef({})
-  latest.current = { problem, lang, codes, elapsed }
+  const sendChat = (e) => {
+    e?.preventDefault()
+    const text = chatInput.trim()
+    if (!text) return
+    if (send({ type: 'chat', text })) {
+      pushMessage('candidate', text)
+      setChatInput('')
+    }
+  }
+
+  useEffect(() => { if (chatOpen) setUnread(0) }, [chatOpen])
+
+  // ── Time warnings ──
+  const warned = useRef(new Set())
+  useEffect(() => {
+    if (timeLeft == null) return
+    for (const t of TIME_WARNINGS) {
+      if (timeLeft <= t && timeLeft > 0 && !warned.current.has(t)) {
+        TIME_WARNINGS.filter((x) => x >= t).forEach((x) => warned.current.add(x))
+        setTimeWarning(t >= 60 ? `${t / 60} minute${t === 60 ? '' : 's'} remaining` : `${t} seconds remaining`)
+        setTimeout(() => setTimeWarning(null), 8000)
+        break
+      }
+    }
+  }, [timeLeft])
 
   // ── Auto-save snapshot every 30s ──
   const keystrokes = useRef(0)
@@ -352,6 +428,7 @@ function InterviewWorkspace({ sessionId }) {
       title: session?.title, elapsed: latest.current.elapsed, problems: summary,
     }))
     send({ type: 'candidate_submitted' })
+    try { localStorage.removeItem(draftKey(sessionId)) } catch { /* ignore */ }
     stopVideo()
     navigate('/candidate/submitted')
   }
@@ -494,6 +571,17 @@ function InterviewWorkspace({ sessionId }) {
           >
             <HelpCircle size={16} />
           </button>
+          <button
+            onClick={() => setChatOpen((o) => !o)}
+            className="relative flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors"
+          >
+            <MessageSquare size={15} /> Chat
+            {unread > 0 && (
+              <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold min-w-4 h-4 px-1 rounded-full flex items-center justify-center">
+                {unread}
+              </span>
+            )}
+          </button>
           {/* WS connectivity indicator */}
           {(
             <div className={`flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-full ${connected ? 'text-emerald-600 bg-emerald-50' : 'text-gray-400 bg-gray-100'}`}>
@@ -554,8 +642,8 @@ function InterviewWorkspace({ sessionId }) {
           <span className="text-emerald-600 font-medium">{solvedCount}/{problems.length} solved</span>
         </div>
         <div className="flex items-center gap-4 text-xs text-gray-400">
-          <button className="flex items-center gap-1 hover:text-gray-600">
-            <AlertCircle size={11} /> Report Issue
+          <button onClick={() => setChatOpen(true)} className="flex items-center gap-1 hover:text-gray-600">
+            <AlertCircle size={11} /> Report an issue to your interviewer
           </button>
           <span>v2.4.0</span>
         </div>
@@ -657,24 +745,49 @@ function InterviewWorkspace({ sessionId }) {
         </div>
       )}
 
-      {/* ── Messages from the interviewer ── */}
-      {interviewerMsgs.length > 0 && (
-        <div className="fixed top-16 right-4 w-72 space-y-2 z-50">
-          {interviewerMsgs.map((m) => (
-            <div key={m.id} className="bg-white border border-blue-200 shadow-lg rounded-xl p-3 flex gap-2">
-              <MessageSquare size={14} className="text-blue-600 flex-shrink-0 mt-0.5" />
-              <div className="flex-1 min-w-0">
-                <p className="text-[10px] font-bold text-blue-600 uppercase tracking-wide">Interviewer</p>
-                <p className="text-sm text-gray-700 break-words">{m.text}</p>
-              </div>
-              <button
-                onClick={() => setInterviewerMsgs((prev) => prev.filter((x) => x.id !== m.id))}
-                className="text-gray-400 hover:text-gray-600 self-start"
-              >
-                <X size={12} />
-              </button>
+      {/* ── Time warning ── */}
+      {timeWarning && (
+        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 bg-amber-500 text-white text-sm font-semibold px-4 py-2 rounded-full shadow-lg flex items-center gap-2">
+          <Clock size={14} /> {timeWarning}
+        </div>
+      )}
+
+      {/* ── Chat with the interviewer ── */}
+      {chatOpen && (
+        <div className="fixed bottom-40 right-4 w-80 bg-white border border-gray-200 rounded-2xl shadow-2xl z-50 flex flex-col" style={{ height: 360 }}>
+          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+            <div>
+              <p className="text-sm font-semibold text-gray-900">Chat with your interviewer</p>
+              <p className="text-[11px] text-gray-400">{connected ? 'Connected' : 'Reconnecting…'}</p>
             </div>
-          ))}
+            <button onClick={() => setChatOpen(false)} className="text-gray-400 hover:text-gray-600"><X size={14} /></button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-3 space-y-2">
+            {messages.length === 0 && (
+              <p className="text-xs text-gray-400 text-center py-6">Ask a clarifying question or report a problem.</p>
+            )}
+            {messages.map((m) => (
+              <div key={m.id} className={m.from === 'candidate' ? 'text-right' : ''}>
+                <div className={`inline-block max-w-[85%] text-left rounded-xl px-3 py-2 text-sm break-words ${
+                  m.from === 'candidate' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-800'
+                }`}>
+                  {m.text}
+                </div>
+                <p className="text-[10px] text-gray-400 mt-0.5">{m.from === 'candidate' ? 'You' : 'Interviewer'} · {m.time}</p>
+              </div>
+            ))}
+          </div>
+          <form onSubmit={sendChat} className="p-3 border-t border-gray-100 flex gap-2">
+            <input
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              placeholder="Type a message…"
+              className="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <button type="submit" disabled={!connected} className="bg-blue-600 text-white rounded-lg px-3 disabled:opacity-50">
+              <Send size={13} />
+            </button>
+          </form>
         </div>
       )}
 

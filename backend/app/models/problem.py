@@ -1,5 +1,6 @@
 import uuid
-from sqlalchemy import String, Text, Integer, ForeignKey, Enum as SAEnum
+from datetime import datetime, timezone
+from sqlalchemy import String, Text, Integer, ForeignKey, DateTime, Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID
 import enum
@@ -26,6 +27,13 @@ class Problem(Base):
     starter_code: Mapped[str] = mapped_column(Text, default="{}")    # JSON map lang->code
     custom_test_default: Mapped[str | None] = mapped_column(Text, nullable=True)
     order_index: Mapped[int] = mapped_column(Integer, default=0)
+    tags: Mapped[str] = mapped_column(Text, default="[]")            # JSON array of strings
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc), nullable=True,
+    )
 
     test_cases: Mapped[list["TestCase"]] = relationship(
         "TestCase", back_populates="problem", order_by="TestCase.order_index", cascade="all, delete-orphan"

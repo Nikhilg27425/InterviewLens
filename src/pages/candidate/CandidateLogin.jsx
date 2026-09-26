@@ -1,5 +1,5 @@
-import React, { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import React, { useEffect, useRef, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Mail, Lock, Eye, EyeOff, Info, ArrowRight, CheckCircle } from 'lucide-react'
 import Logo from '../../components/Logo'
 import { authAPI, sessionsAPI, candidateSession } from '../../services/api'
@@ -24,10 +24,24 @@ const perks = [
 
 export default function CandidateLogin() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const [showPassword, setShowPassword] = useState(false)
-  const [form, setForm] = useState({ email: '', token: '' })
+  // The invite email links here with ?email=&token= so candidates join in one click
+  const [form, setForm] = useState({
+    email: searchParams.get('email') || '',
+    token: searchParams.get('token') || '',
+  })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const autoSubmitted = useRef(false)
+
+  useEffect(() => {
+    if (!autoSubmitted.current && searchParams.get('email') && searchParams.get('token')) {
+      autoSubmitted.current = true
+      signIn(form.email, form.token)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const handleSubmit = (e) => {
     e.preventDefault()
@@ -35,10 +49,14 @@ export default function CandidateLogin() {
       setError('Please enter both your email and the access token from your invite.')
       return
     }
+    signIn(form.email, form.token)
+  }
+
+  function signIn(rawEmail, rawToken) {
     setError('')
     setLoading(true)
-    const accessToken = form.token.trim().toUpperCase()
-    const email = form.email.trim()
+    const accessToken = rawToken.trim().toUpperCase()
+    const email = rawEmail.trim()
     Promise.all([
       authAPI.loginCandidate(email, accessToken),
       sessionsAPI.getByToken(accessToken),
@@ -58,7 +76,6 @@ export default function CandidateLogin() {
         // Show actual error instead of bypassing to demo mode
         const errorMessage = err.response?.data?.detail || err.message || 'Authentication failed. Please check your credentials.'
         setError(errorMessage)
-        console.error('Candidate login error:', err)
       })
   }
 

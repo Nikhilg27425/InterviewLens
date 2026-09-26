@@ -42,6 +42,9 @@ export async function loadSessionProblems(session) {
     const { data } = await problemsAPI.list()
     ids = data.map((p) => p.id)
   }
-  const results = await Promise.all(ids.map((id) => problemsAPI.get(id).then((r) => r.data)))
-  return results.map(normaliseProblem)
+  // Skip problems deleted since the session was created rather than failing the whole page
+  const results = await Promise.allSettled(ids.map((id) => problemsAPI.get(id).then((r) => r.data)))
+  const found = results.filter((r) => r.status === 'fulfilled').map((r) => r.value)
+  if (!found.length && results.length) throw results[0].reason
+  return found.map(normaliseProblem)
 }

@@ -8,12 +8,14 @@ import {
   Settings,
   HelpCircle,
   LogOut,
+  BookOpen,
 } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 
 const navItems = [
   { label: 'Dashboard', icon: LayoutDashboard, to: '/dashboard' },
   { label: 'Interviews', icon: Users, to: '/interviews' },
+  { label: 'Problem Bank', icon: BookOpen, to: '/problems' },
   { label: 'Code Analysis', icon: Code2, to: '/code-analysis' },
   { label: 'Insights', icon: BarChart3, to: '/insights' },
 ]

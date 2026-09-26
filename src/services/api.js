@@ -75,6 +75,8 @@ export const authAPI = {
   loginInterviewer:    (email, pass)  => api.post('/api/auth/login', { email, password: pass }),
   loginCandidate:      (email, token) => api.post('/api/auth/candidate/login', { email, access_token: token }),
   me:                  ()             => api.get('/api/auth/me'),
+  updateMe:            (data)         => api.patch('/api/auth/me', data),
+  changePassword:      (current, next) => api.post('/api/auth/change-password', { current_password: current, new_password: next }),
   
   // OAuth methods - These return URLs for redirecting to OAuth providers
   googleLogin:         ()             => `${BASE_URL}/api/auth/google/login`,
@@ -90,6 +92,7 @@ export const problemsAPI = {
   get:         (id)  => api.get(`/api/problems/${id}`),
   getBySlug:   (slug)=> api.get(`/api/problems/slug/${slug}`),
   create:      (data)=> api.post('/api/problems', data),
+  update:      (id, data) => api.put(`/api/problems/${id}`, data),
   delete:      (id)  => api.delete(`/api/problems/${id}`),
 }
 
@@ -105,6 +108,9 @@ export const sessionsAPI = {
   start:        (id)       => api.post(`/api/sessions/${id}/start`),
   end:          (id)       => api.post(`/api/sessions/${id}/end`),
   join:         (id)       => api.post(`/api/sessions/${id}/join`),
+  cancel:       (id)       => api.post(`/api/sessions/${id}/cancel`),
+  resendInvite: (id)       => api.post(`/api/sessions/${id}/invite`),
+  invitePreview:(id)       => api.get(`/api/sessions/${id}/invite-preview`),
   getByToken:   (token)    => api.get(`/api/sessions/by-token/${token}`),
 }
 
@@ -149,3 +155,12 @@ export const analyticsAPI = {
 }
 
 export default api
+
+/** Readable message from an axios error (FastAPI `detail` string or validation list). */
+export function apiErrorMessage(err, fallback = 'Something went wrong.') {
+  const detail = err?.response?.data?.detail
+  if (Array.isArray(detail)) return detail.map((d) => d.msg?.replace(/^Value error, /, '')).join('. ')
+  if (typeof detail === 'string') return detail
+  if (err && !err.response) return 'Cannot reach the server. Make sure the backend is running.'
+  return fallback
+}

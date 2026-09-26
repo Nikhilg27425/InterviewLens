@@ -12,6 +12,13 @@ class SessionCreate(BaseModel):
     candidate_email: str | None = None   # Email for validation
     candidate_role: str | None = None
     scheduled_at: datetime | None = None
+    send_invite: bool = True             # email the candidate their access details
+
+
+class InviteStatus(BaseModel):
+    sent: bool
+    mode: str                            # "smtp" | "outbox"
+    detail: str = ""
 
 
 class SessionUpdate(BaseModel):
@@ -23,6 +30,8 @@ class SessionUpdate(BaseModel):
     candidate_name: str | None = None
     candidate_email: str | None = None
     candidate_role: str | None = None
+    scheduled_at: datetime | None = None
+    duration_minutes: int | None = None
 
 
 class SessionOut(BaseModel):
@@ -44,8 +53,17 @@ class SessionOut(BaseModel):
     notes: str | None
     ai_summary: str | None
     final_score: int | None
+    invite_sent_at: datetime | None = None
+    invite: InviteStatus | None = None   # set on responses that just (re)sent an invite
 
     model_config = {"from_attributes": True}
+
+
+class InvitePreview(BaseModel):
+    to: str
+    subject: str
+    html: str
+    login_link: str
 
 
 class SessionSummary(BaseModel):
@@ -61,5 +79,7 @@ class SessionSummary(BaseModel):
     scheduled_at: datetime | None
     created_at: datetime
     final_score: int | None
+    invite_sent_at: datetime | None = None
+    problem_ids: str | None = None
 
     model_config = {"from_attributes": True}
