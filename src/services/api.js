@@ -9,7 +9,14 @@
  */
 import axios from 'axios'
 
-export const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+// Production builds are served by the backend itself, so '' (same origin) is the default there
+export const BASE_URL = import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? 'http://localhost:8000' : '')
+
+/** WebSocket origin: explicit VITE_WS_URL, else derived from the API origin or the page. */
+export const WS_BASE = import.meta.env.VITE_WS_URL ||
+  (BASE_URL
+    ? BASE_URL.replace(/^http/, 'ws')
+    : `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`)
 
 // ── Candidate session (per tab) ──────────────────────────────────────────────
 

@@ -1,5 +1,8 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from pathlib import Path
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
@@ -60,3 +63,24 @@ app.include_router(ws_router)
 @app.get("/health")
 async def health():
     return {"status": "ok", "version": "1.0.0"}
+
+
+# ── Frontend (production) ────────────────────────────────────────────────────
+# The Docker image bundles the built React app; serve it from the same origin
+# so the API, WebSocket and SPA share one URL. Absent in local dev (Vite serves it).
+
+STATIC_DIR = Path(settings.STATIC_DIR).resolve()
+
+if (STATIC_DIR / "index.html").is_file():
+    if (STATIC_DIR / "assets").is_dir():
+        app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def spa(full_path: str):
+        if full_path.startswith(("api/", "ws/")):
+            raise HTTPException(status_code=404, detail="Not found")
+        candidate = (STATIC_DIR / full_path).resolve()
+        if full_path and candidate.is_file() and STATIC_DIR in candidate.parents:
+            return FileResponse(candidate)
+        # Client-side route — let React Router handle it
+        return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"})

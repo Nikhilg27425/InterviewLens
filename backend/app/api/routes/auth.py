@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+import logging
+import secrets
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, func
 from starlette.responses import RedirectResponse
@@ -16,7 +18,29 @@ from app.schemas.user import (
 )
 from app.api.deps import get_current_user
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+OAUTH_STATE_COOKIE = "oauth_state"
+
+
+def _new_state(provider: str) -> str:
+    return f"{provider}:{secrets.token_urlsafe(24)}"
+
+
+def _redirect_with_state(url: str, state: str) -> RedirectResponse:
+    response = RedirectResponse(url=url)
+    response.set_cookie(
+        OAUTH_STATE_COOKIE, state, max_age=600, httponly=True, samesite="lax",
+        secure=settings.FRONTEND_URL.startswith("https"), path="/",
+    )
+    return response
+
+
+def _login_error(message: str) -> RedirectResponse:
+    response = RedirectResponse(url=f"{settings.FRONTEND_URL}/login?{urlencode({'error': message})}")
+    response.delete_cookie(OAUTH_STATE_COOKIE, path="/")
+    return response
 
 
 # ── Interviewer registration ──────────────────────────────────────────────────
@@ -205,11 +229,9 @@ async def google_login():
         "scope": "openid email profile",
         "access_type": "online",
         "prompt": "select_account",
-        "state": "google"  # Use state parameter to identify provider
+        "state": _new_state("google"),
     }
-    
-    auth_url = f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}"
-    return RedirectResponse(url=auth_url)
+    return _redirect_with_state(f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}", params["state"])
 
 
 @router.get("/github/login")
@@ -225,22 +247,31 @@ async def github_login():
         "redirect_uri": settings.OAUTH_REDIRECT_URI,  # No provider parameter here
         "scope": "user:email",
         "allow_signup": "true",
-        "state": "github"  # Use state parameter to identify provider
+        "state": _new_state("github"),
     }
-    
-    auth_url = f"https://github.com/login/oauth/authorize?{urlencode(params)}"
-    return RedirectResponse(url=auth_url)
+    return _redirect_with_state(f"https://github.com/login/oauth/authorize?{urlencode(params)}", params["state"])
 
 
 @router.get("/oauth/callback")
 async def oauth_callback(
-    code: str,
-    state: str,  # Changed from 'provider' to 'state'
+    request: Request,
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+    error_description: str | None = None,
     db: AsyncSession = Depends(get_db)
 ):
     """Handle OAuth callback and create/login user"""
-    
-    provider = state  # state contains 'google' or 'github'
+    # User pressed "Cancel" on the provider's consent screen, or the provider errored
+    if error or not code:
+        message = error_description or ("Sign-in was cancelled" if error == "access_denied" else error) or "Sign-in failed"
+        return _login_error(message)
+
+    # CSRF: the state must match the one we issued to this browser
+    expected = request.cookies.get(OAUTH_STATE_COOKIE)
+    if not state or not expected or not secrets.compare_digest(state, expected):
+        return _login_error("Sign-in session expired. Please try again.")
+    provider = state.split(":", 1)[0]
     
     try:
         if provider == "google":
@@ -269,6 +300,8 @@ async def oauth_callback(
                 )
                 user_info = userinfo_response.json()
                 
+                if not user_info.get("verified_email"):
+                    raise HTTPException(status_code=400, detail="Your Google email address isn't verified")
                 email = user_info.get("email")
                 oauth_id = user_info.get("id")
                 full_name = user_info.get("name", email.split("@")[0])
@@ -314,7 +347,11 @@ async def oauth_callback(
                     }
                 )
                 emails = email_response.json()
-                primary_email = next((e["email"] for e in emails if e["primary"]), emails[0]["email"] if emails else None)
+                # Only verified addresses — sign-in links to existing accounts by email
+                verified = [e for e in emails if isinstance(e, dict) and e.get("verified")] if isinstance(emails, list) else []
+                primary_email = next((e["email"] for e in verified if e.get("primary")), verified[0]["email"] if verified else None)
+                if not primary_email:
+                    raise HTTPException(status_code=400, detail="Your GitHub account has no verified email address")
                 
                 email = primary_email
                 oauth_id = str(user_info.get("id"))
@@ -373,10 +410,12 @@ async def oauth_callback(
             "full_name": user.full_name,
             "role": user.role.value,
         })
-        return RedirectResponse(url=f"{settings.FRONTEND_URL}/auth/callback?{params}")
+        response = RedirectResponse(url=f"{settings.FRONTEND_URL}/auth/callback?{params}")
+        response.delete_cookie(OAUTH_STATE_COOKIE, path="/")
+        return response
         
     except HTTPException as e:
-        return RedirectResponse(url=f"{settings.FRONTEND_URL}/login?{urlencode({'error': e.detail})}")
-    except Exception as e:
-        # Redirect to frontend with error
-        return RedirectResponse(url=f"{settings.FRONTEND_URL}/login?{urlencode({'error': str(e)})}")
+        return _login_error(e.detail)
+    except Exception:
+        logger.exception("OAuth callback failed")
+        return _login_error("Sign-in failed. Please try again.")

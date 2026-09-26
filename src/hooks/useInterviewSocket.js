@@ -13,9 +13,8 @@
  * `lastMessage` state value, nothing is lost when messages arrive in bursts.
  */
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { getAuthToken } from '../services/api'
+import { getAuthToken, WS_BASE } from '../services/api'
 
-const WS_BASE = import.meta.env.VITE_WS_URL || 'ws://localhost:8000'
 const RECONNECT_DELAY_MS = 3000
 const MAX_RECONNECTS = 10
 // Server close codes that retrying cannot fix (bad token / not a participant / no session)
