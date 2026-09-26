@@ -1,21 +1,7 @@
-import React, { useEffect, useState } from 'react'
-import { CheckCircle, Clock, Mail, Shield, BarChart3, ArrowRight } from 'lucide-react'
+import React, { useEffect, useMemo, useState } from 'react'
+import { CheckCircle, Clock, Shield, BarChart3, ArrowRight } from 'lucide-react'
 import Logo from '../../components/Logo'
-
-const SUMMARY = [
-  { label: 'Problems Attempted', value: '3 / 3' },
-  { label: 'Problems Solved', value: '2 / 3' },
-  { label: 'Time Used', value: '47m 12s' },
-  { label: 'Time Remaining', value: '12m 48s' },
-  { label: 'Code Runs', value: '14' },
-  { label: 'Integrity Status', value: 'Clean', highlight: 'green' },
-]
-
-const PROBLEMS_SUMMARY = [
-  { title: 'Two Sum', difficulty: 'Easy', status: 'Solved', score: 15, max: 15 },
-  { title: 'Valid Parentheses', difficulty: 'Easy', status: 'Solved', score: 15, max: 15 },
-  { title: 'LRU Cache', difficulty: 'Medium', status: 'Attempted', score: 18, max: 30 },
-]
+import { candidateSession } from '../../services/api'
 
 const DIFF_COLORS = {
   Easy: 'bg-emerald-100 text-emerald-700',
@@ -23,8 +9,18 @@ const DIFF_COLORS = {
   Hard: 'bg-red-100 text-red-600',
 }
 
+const fmtDuration = (s) => `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`
+
+function readSummary() {
+  try { return JSON.parse(sessionStorage.getItem('submission_summary')) } catch { return null }
+}
+
 export default function CandidateSubmitted() {
   const [progress, setProgress] = useState(0)
+  const summary = useMemo(readSummary, [])
+
+  // The assessment is over — drop this tab's candidate credentials
+  useEffect(() => { candidateSession.clear() }, [])
 
   // Animate progress bar on mount
   useEffect(() => {
@@ -32,9 +28,24 @@ export default function CandidateSubmitted() {
     return () => clearTimeout(t)
   }, [])
 
+  const PROBLEMS_SUMMARY = (summary?.problems || []).map((p) => ({
+    title: p.title,
+    difficulty: p.difficulty,
+    status: p.total > 0 && p.passed === p.total ? 'Solved' : p.attempted ? 'Attempted' : 'Not attempted',
+    score: p.passed,
+    max: p.total,
+  }))
+  const solvedCount = PROBLEMS_SUMMARY.filter((p) => p.status === 'Solved').length
+  const attemptedCount = PROBLEMS_SUMMARY.filter((p) => p.status !== 'Not attempted').length
+  const SUMMARY = [
+    { label: 'Problems Attempted', value: `${attemptedCount} / ${PROBLEMS_SUMMARY.length}` },
+    { label: 'Problems Solved', value: `${solvedCount} / ${PROBLEMS_SUMMARY.length}` },
+    { label: 'Time Used', value: summary ? fmtDuration(summary.elapsed || 0) : '—' },
+  ]
+
   const totalScore = PROBLEMS_SUMMARY.reduce((a, p) => a + p.score, 0)
   const maxScore = PROBLEMS_SUMMARY.reduce((a, p) => a + p.max, 0)
-  const pct = Math.round((totalScore / maxScore) * 100)
+  const pct = maxScore ? Math.round((totalScore / maxScore) * 100) : 0
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
@@ -58,8 +69,8 @@ export default function CandidateSubmitted() {
                 Assessment Submitted!
               </h1>
               <p className="text-gray-500 text-base max-w-md mx-auto leading-relaxed">
-                Your responses have been securely recorded and sent to the hiring team at{' '}
-                <span className="font-semibold text-gray-800">Acme Technologies</span>.
+                Your responses have been securely recorded and sent to the hiring team
+                {summary?.title && <> for <span className="font-semibold text-gray-800">{summary.title}</span></>}.
               </p>
 
               {/* Score ring */}
@@ -82,12 +93,12 @@ export default function CandidateSubmitted() {
                   </svg>
                   <div className="absolute inset-0 flex flex-col items-center justify-center">
                     <span className="text-2xl font-extrabold text-gray-900">{totalScore}</span>
-                    <span className="text-xs text-gray-400 font-medium">/ {maxScore} pts</span>
+                    <span className="text-xs text-gray-400 font-medium">/ {maxScore} tests</span>
                   </div>
                 </div>
               </div>
               <p className="text-gray-500 text-sm">
-                You scored <span className="font-bold text-gray-800">{pct}%</span> of total available points
+                You passed <span className="font-bold text-gray-800">{pct}%</span> of all test cases
               </p>
             </div>
           </div>
@@ -154,12 +165,6 @@ export default function CandidateSubmitted() {
                   desc: 'InterviewLens is generating your behavioral and code quality report for the hiring team.',
                 },
                 {
-                  icon: Mail,
-                  color: 'bg-purple-50 text-purple-600',
-                  title: 'Confirmation email sent',
-                  desc: 'A submission receipt has been sent to the email address you used to sign in.',
-                },
-                {
                   icon: Clock,
                   color: 'bg-amber-50 text-amber-600',
                   title: 'Expect a response within 3–5 business days',
@@ -192,7 +197,7 @@ export default function CandidateSubmitted() {
               You can safely close this window. Good luck with the rest of your process!
             </p>
             <a
-              href="https://interviewlens.io"
+              href="/"
               className="inline-flex items-center gap-2 bg-white text-gray-900 font-semibold text-sm px-5 py-2.5 rounded-xl hover:bg-gray-100 transition-colors"
             >
               Learn about InterviewLens <ArrowRight size={15} />

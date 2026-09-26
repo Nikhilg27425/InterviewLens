@@ -9,7 +9,7 @@ from app.models.signal import ProctoringSignal, RISK_MAP, SignalType, RiskLevel
 from app.models.session import InterviewSession, SessionStatus
 from app.models.user import User
 from app.schemas.signal import SignalCreate, SignalOut, SignalBatch
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_session_for_user
 from app.websocket.manager import manager
 
 router = APIRouter(prefix="/signals", tags=["signals"])
@@ -36,11 +36,7 @@ async def record_signal(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    sess = (await db.execute(
-        select(InterviewSession).where(InterviewSession.id == body.session_id)
-    )).scalar_one_or_none()
-    if not sess:
-        raise HTTPException(404, "Session not found")
+    await get_session_for_user(body.session_id, db, current_user)
 
     record = await _save_signal(db, body, current_user.id)
     await db.flush()
@@ -71,6 +67,8 @@ async def record_signals_batch(
     current_user: User = Depends(get_current_user),
 ):
     """Accept multiple signals at once (frontend batches every 5s)."""
+    for sid in {sig.session_id for sig in body.signals}:
+        await get_session_for_user(sid, db, current_user)
     records = []
     for sig in body.signals:
         r = await _save_signal(db, sig, current_user.id)
@@ -101,8 +99,9 @@ async def record_signals_batch(
 async def get_session_signals(
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
+    await get_session_for_user(session_id, db, current_user)
     result = await db.execute(
         select(ProctoringSignal)
         .where(ProctoringSignal.session_id == session_id)
@@ -115,9 +114,10 @@ async def get_session_signals(
 async def get_signal_summary(
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Return counts per signal type + per risk level."""
+    await get_session_for_user(session_id, db, current_user)
     result = await db.execute(
         select(ProctoringSignal.signal_type, ProctoringSignal.risk_level, func.count())
         .where(ProctoringSignal.session_id == session_id)

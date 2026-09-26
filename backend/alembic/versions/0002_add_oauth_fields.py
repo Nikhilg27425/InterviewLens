@@ -22,13 +22,13 @@ def upgrade() -> None:
                     existing_type=sa.String(255),
                     nullable=True)
     
-    # Add OAuth fields
-    op.add_column('users', sa.Column('oauth_provider', sa.String(50), nullable=True))
-    op.add_column('users', sa.Column('oauth_id', sa.String(255), nullable=True))
-    op.add_column('users', sa.Column('profile_picture', sa.String(500), nullable=True))
-    
+    # Add OAuth fields (IF NOT EXISTS: tables may have been created by create_all)
+    op.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS oauth_provider VARCHAR(50)")
+    op.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS oauth_id VARCHAR(255)")
+    op.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_picture VARCHAR(500)")
+
     # Create index on oauth_id for faster lookups
-    op.create_index('ix_users_oauth_id', 'users', ['oauth_id'])
+    op.execute("CREATE INDEX IF NOT EXISTS ix_users_oauth_id ON users (oauth_id)")
 
 
 def downgrade() -> None:

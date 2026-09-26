@@ -6,20 +6,29 @@ The JWT is passed as a query param (can't set Authorization header from browser 
 """
 import json
 import logging
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, Depends
+import uuid
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 from jose import JWTError
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.core.security import decode_token
-from app.db.base import get_db, AsyncSessionLocal
-from app.models.user import User
+from app.db.base import AsyncSessionLocal
 from app.models.session import InterviewSession
 from app.websocket.manager import manager
 from app.models.signal import ProctoringSignal, RISK_MAP, SignalType
 
 router = APIRouter(tags=["websocket"])
 logger = logging.getLogger(__name__)
+
+# Signaling messages relayed verbatim (minus "type") to everyone else in the room
+WEBRTC_RELAY = {"webrtc_offer", "webrtc_answer", "webrtc_ice_candidate", "webrtc_request"}
+
+
+async def _reject(websocket: WebSocket, code: int, reason: str):
+    # Accept first so the browser receives our close code; closing before the
+    # handshake surfaces only as a generic 1006 and the client would keep retrying.
+    await websocket.accept()
+    await websocket.close(code=code, reason=reason)
 
 
 async def _auth_ws(token: str) -> dict | None:
@@ -37,23 +46,31 @@ async def websocket_endpoint(
 ):
     payload = await _auth_ws(token)
     if not payload:
-        await websocket.close(code=4001, reason="Invalid token")
+        await _reject(websocket, 4001, "Invalid token")
         return
 
     user_id = payload.get("sub")
     role    = payload.get("role", "candidate")
 
-    logger.info(f"WebSocket connection: user_id={user_id}, role={role}, session={session_id}")
+    try:
+        session_uuid = uuid.UUID(session_id)
+    except ValueError:
+        await _reject(websocket, 4004, "Session not found")
+        return
 
-    # Validate session exists
+    # Validate session exists and the user belongs to it
     async with AsyncSessionLocal() as db:
         sess = (await db.execute(
-            select(InterviewSession).where(InterviewSession.id == session_id)
+            select(InterviewSession).where(InterviewSession.id == session_uuid)
         )).scalar_one_or_none()
-        if not sess:
-            await websocket.close(code=4004, reason="Session not found")
-            return
+    if not sess:
+        await _reject(websocket, 4004, "Session not found")
+        return
+    if role != "admin" and user_id not in (str(sess.interviewer_id), str(sess.candidate_id)):
+        await _reject(websocket, 4003, "Not a participant of this session")
+        return
 
+    logger.info(f"WebSocket connection: user_id={user_id}, role={role}, session={session_id}")
     await manager.connect(websocket, session_id, user_id, role)
 
     try:
@@ -90,10 +107,9 @@ async def websocket_endpoint(
 
                 risk = RISK_MAP.get(sig_type)
 
-                # Persist asynchronously
                 async with AsyncSessionLocal() as db:
                     record = ProctoringSignal(
-                        session_id=session_id,
+                        session_id=session_uuid,
                         candidate_id=user_id,
                         signal_type=sig_type,
                         risk_level=risk,
@@ -103,13 +119,12 @@ async def websocket_endpoint(
                     db.add(record)
                     await db.commit()
 
-                # Broadcast to all (mainly the interviewer)
                 await manager.broadcast_to_session(
                     session_id,
                     {
                         "type":            "signal",
                         "signal_type":     sig_type_str,
-                        "risk_level":      str(risk),
+                        "risk_level":      risk.value,
                         "elapsed_seconds": msg.get("elapsed_seconds"),
                         "detail":          msg.get("detail"),
                         "sender":          user_id,
@@ -137,49 +152,30 @@ async def websocket_endpoint(
                     {"type": "session_ended", "by": user_id},
                 )
 
+            # ── candidate pressed "Submit All" ──
+            elif msg_type == "candidate_submitted" and role == "candidate":
+                await manager.broadcast_to_session(
+                    session_id,
+                    {"type": "candidate_submitted", "sender": user_id},
+                    exclude=websocket,
+                )
+
             # ── ping / keepalive ──
             elif msg_type == "ping":
                 await manager.send_to(websocket, {"type": "pong"})
 
             # ── WebRTC signaling for video streaming ──
-            elif msg_type == "webrtc_offer":
-                # Candidate sends offer to interviewer
+            elif msg_type in WEBRTC_RELAY:
+                relayed = {k: v for k, v in msg.items() if k != "type"}
                 await manager.broadcast_to_session(
                     session_id,
-                    {
-                        "type":   "webrtc_offer",
-                        "offer":  msg.get("offer"),
-                        "sender": user_id,
-                    },
+                    {"type": msg_type, **relayed, "sender": user_id, "role": role},
                     exclude=websocket,
                 )
-                logger.info(f"WebRTC offer sent from {user_id} in session {session_id}")
-
-            elif msg_type == "webrtc_answer":
-                # Interviewer sends answer back to candidate
-                await manager.broadcast_to_session(
-                    session_id,
-                    {
-                        "type":   "webrtc_answer",
-                        "answer": msg.get("answer"),
-                        "sender": user_id,
-                    },
-                    exclude=websocket,
-                )
-                logger.info(f"WebRTC answer sent from {user_id} in session {session_id}")
-
-            elif msg_type == "webrtc_ice_candidate":
-                # Exchange ICE candidates for NAT traversal
-                await manager.broadcast_to_session(
-                    session_id,
-                    {
-                        "type":      "webrtc_ice_candidate",
-                        "candidate": msg.get("candidate"),
-                        "sender":    user_id,
-                    },
-                    exclude=websocket,
-                )
-                logger.debug(f"ICE candidate exchanged in session {session_id}")
 
     except WebSocketDisconnect:
+        pass
+    except Exception:
+        logger.exception(f"WebSocket error in session {session_id}")
+    finally:
         manager.disconnect(websocket, session_id, user_id, role)

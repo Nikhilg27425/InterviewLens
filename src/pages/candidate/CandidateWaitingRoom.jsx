@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Navigate, useNavigate } from 'react-router-dom'
 import {
   Camera, Mic, Monitor, Wifi, CheckCircle, XCircle,
-  Loader, AlertTriangle, ChevronRight, Clock, Shield,
+  Loader, AlertTriangle, ChevronRight, Shield,
   RefreshCw,
 } from 'lucide-react'
 import Logo from '../../components/Logo'
+import { BASE_URL, candidateSession, sessionsAPI } from '../../services/api'
 
 const CHECKS = [
   { id: 'camera', icon: Camera, label: 'Camera access', desc: 'Required for proctoring' },
@@ -13,6 +14,8 @@ const CHECKS = [
   { id: 'screen', icon: Monitor, label: 'Screen resolution', desc: 'Minimum 1024×768 required' },
   { id: 'network', icon: Wifi, label: 'Network speed', desc: 'Stable connection needed' },
 ]
+
+const CHECK_TIMEOUT_MS = 15000
 
 const RULES = [
   'Do not open any other browser tabs or windows during the test.',
@@ -22,15 +25,6 @@ const RULES = [
   'Refreshing or navigating away will be logged as a risk signal.',
   'Submit your final answer before the timer expires.',
 ]
-
-const ASSESSMENT = {
-  title: 'Senior Frontend Engineer Assessment',
-  company: 'Acme Technologies',
-  duration: '60 minutes',
-  problems: 3,
-  difficulty: 'Medium / Hard',
-  starts: 'On your command',
-}
 
 function CheckRow({ icon: Icon, label, desc, status }) {
   return (
@@ -66,6 +60,7 @@ function CheckRow({ icon: Icon, label, desc, status }) {
 
 export default function CandidateWaitingRoom() {
   const navigate = useNavigate()
+  const sessionId = candidateSession.sessionId
   const [checkStates, setCheckStates] = useState({
     camera: 'idle', mic: 'idle', screen: 'idle', network: 'idle',
   })
@@ -73,24 +68,36 @@ export default function CandidateWaitingRoom() {
   const [runningChecks, setRunningChecks] = useState(false)
   const [allPassed, setAllPassed] = useState(false)
   const [checksDone, setChecksDone] = useState(false)
-  const [timeUntilStart] = useState({ h: 0, m: 4, s: 30 })
-  const [countdown, setCountdown] = useState(
-    timeUntilStart.h * 3600 + timeUntilStart.m * 60 + timeUntilStart.s
-  )
+  const [session, setSession] = useState(null)
+  const [error, setError] = useState('')
+  const [joining, setJoining] = useState(false)
 
-  // Countdown clock
   useEffect(() => {
-    const t = setInterval(() => setCountdown((c) => (c > 0 ? c - 1 : 0)), 1000)
-    return () => clearInterval(t)
-  }, [])
+    if (!sessionId) return
+    sessionsAPI.get(sessionId)
+      .then(({ data }) => {
+        if (data.status === 'completed' || data.status === 'cancelled') {
+          setError('This interview session has already ended.')
+        }
+        setSession(data)
+      })
+      .catch((err) => setError(err.response?.data?.detail || 'Could not load your interview session.'))
+  }, [sessionId])
 
-  const fmtCountdown = (s) => {
-    const h = Math.floor(s / 3600)
-    const m = Math.floor((s % 3600) / 60)
-    const sec = s % 60
-    if (h > 0) return `${h}h ${m}m ${sec}s`
-    if (m > 0) return `${m}m ${sec}s`
-    return `${sec}s`
+  if (!sessionId) return <Navigate to="/candidate/login" replace />
+
+  const problemCount = session?.problem_ids ? session.problem_ids.split(',').filter(Boolean).length : null
+
+  const beginInterview = async () => {
+    setJoining(true)
+    setError('')
+    try {
+      await sessionsAPI.join(sessionId)
+      navigate('/candidate/interview')
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Could not start the interview. Please try again.')
+      setJoining(false)
+    }
   }
 
   const runChecks = async () => {
@@ -113,209 +120,46 @@ export default function CandidateWaitingRoom() {
       
       // Actually perform the checks
       let passed = false
-      
+      const timeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error(`${id} check timed out`)), CHECK_TIMEOUT_MS))
+
       try {
-        if (id === 'camera') {
-          // Check camera access AND verify it can actually record
-          try {
-            const stream = await navigator.mediaDevices.getUserMedia({ 
-              video: { width: { min: 640 }, height: { min: 480 } } 
-            })
-            
-            // Verify we got video tracks
-            const videoTracks = stream.getVideoTracks()
-            if (videoTracks.length === 0) {
-              throw new Error('No video track')
-            }
-            
-            // Verify track is active and enabled
-            const videoTrack = videoTracks[0]
-            if (videoTrack.readyState !== 'live' || !videoTrack.enabled) {
-              throw new Error('Video track not live')
-            }
-            
-            // Test recording for 1 second to ensure it actually works
-            const mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' })
-            let recordedData = []
-            
-            await new Promise((resolve, reject) => {
-              const timeout = setTimeout(() => reject(new Error('Recording timeout')), 3000)
-              
-              mediaRecorder.ondataavailable = (e) => {
-                if (e.data && e.data.size > 0) {
-                  recordedData.push(e.data)
-                }
-              }
-              
-              mediaRecorder.onstop = () => {
-                clearTimeout(timeout)
-                resolve()
-              }
-              
-              mediaRecorder.onerror = (e) => {
-                clearTimeout(timeout)
-                reject(e)
-              }
-              
-              mediaRecorder.start()
-              setTimeout(() => {
-                if (mediaRecorder.state === 'recording') {
-                  mediaRecorder.stop()
-                }
-              }, 1000)
-            })
-            
-            // Verify we actually recorded something
-            if (recordedData.length === 0) {
-              throw new Error('No data recorded')
-            }
-            
-            // Stop all tracks
-            stream.getTracks().forEach(track => track.stop())
-            passed = true
-          } catch (error) {
-            console.error('Camera check failed:', error)
-            passed = false
-          }
-          
-        } else if (id === 'mic') {
-          // Check microphone access AND verify it can actually capture audio
-          try {
-            const stream = await navigator.mediaDevices.getUserMedia({ 
-              audio: {
-                echoCancellation: true,
-                noiseSuppression: true,
-                autoGainControl: true
-              } 
-            })
-            
-            // Verify we got audio tracks
-            const audioTracks = stream.getAudioTracks()
-            if (audioTracks.length === 0) {
-              throw new Error('No audio track')
-            }
-            
-            // Verify track is active and enabled
-            const audioTrack = audioTracks[0]
-            if (audioTrack.readyState !== 'live' || !audioTrack.enabled) {
-              throw new Error('Audio track not live')
-            }
-            
-            // Use AudioContext to verify actual audio signal
-            const audioContext = new (window.AudioContext || window.webkitAudioContext)()
-            const analyser = audioContext.createAnalyser()
-            const microphone = audioContext.createMediaStreamSource(stream)
-            analyser.fftSize = 256
-            const bufferLength = analyser.frequencyBinCount
-            const dataArray = new Uint8Array(bufferLength)
-            
-            microphone.connect(analyser)
-            
-            // Check for audio signal over 1 second
-            let maxLevel = 0
-            const checkAudioLevel = () => {
-              analyser.getByteFrequencyData(dataArray)
-              const average = dataArray.reduce((a, b) => a + b) / bufferLength
-              if (average > maxLevel) maxLevel = average
-            }
-            
-            await new Promise((resolve) => {
-              const interval = setInterval(checkAudioLevel, 50)
-              setTimeout(() => {
-                clearInterval(interval)
-                resolve()
-              }, 1500)
-            })
-            
-            // Clean up
-            microphone.disconnect()
-            audioContext.close()
-            stream.getTracks().forEach(track => track.stop())
-            
-            // Verify we detected some audio activity (threshold: 5 out of 255)
-            // This detects ambient noise or user making sound
-            if (maxLevel < 5) {
-              console.warn('Microphone permission granted but no audio signal detected')
-              // We'll still pass if permission is granted and device is working
-              // since user might be in a quiet environment
-            }
-            
-            passed = true
-          } catch (error) {
-            console.error('Microphone check failed:', error)
-            passed = false
-          }
-          
-        } else if (id === 'screen') {
-          // Check screen resolution (minimum 1024x768)
-          passed = window.screen.width >= 1024 && window.screen.height >= 768
-          
-        } else if (id === 'network') {
-          // Check network connection thoroughly
-          if (!navigator.onLine) {
-            passed = false
-          } else {
+        await Promise.race([timeout, (async () => {
+          if (id === 'camera') {
             try {
-              // Test 1: Check latency with multiple fallback URLs
-              const testUrls = [
-                'https://www.google.com/favicon.ico',
-                'https://cdn.jsdelivr.net/npm/react/package.json',
-                'https://unpkg.com/react/package.json'
-              ]
-              
-              let latencyPassed = false
-              
-              for (const testUrl of testUrls) {
-                try {
-                  const startTime = performance.now()
-                  const response = await fetch(testUrl, { 
-                    cache: 'no-cache',
-                    mode: 'no-cors' // Avoid CORS issues
-                  })
-                  const endTime = performance.now()
-                  const latency = endTime - startTime
-                  
-                  // Latency should be reasonable (< 3000ms)
-                  if (latency < 3000) {
-                    latencyPassed = true
-                    break
-                  }
-                } catch (err) {
-                  console.warn(`Failed to test ${testUrl}:`, err)
-                  continue
-                }
-              }
-              
-              if (!latencyPassed) {
-                passed = false
-              } else {
-                // Test 2: Check connection speed using Network Information API
-                if (navigator.connection) {
-                  const connection = navigator.connection
-                  const downlink = connection.downlink || 0
-                  const effectiveType = connection.effectiveType || ''
-                  
-                  // Require at least 1 Mbps downlink OR effective type of 3g or better
-                  if (downlink > 0) {
-                    passed = downlink >= 1
-                  } else if (effectiveType) {
-                    // Accept 3g, 4g, or better
-                    passed = ['4g', '3g'].includes(effectiveType)
-                  } else {
-                    // Can't determine speed, but latency was acceptable
-                    passed = true
-                  }
-                } else {
-                  // Network Information API not available, but latency was good
-                  passed = true
-                }
-              }
+              const stream = await navigator.mediaDevices.getUserMedia({ video: true })
+              const track = stream.getVideoTracks()[0]
+              passed = !!track && track.readyState === 'live' && track.enabled
+              stream.getTracks().forEach((t) => t.stop())
             } catch (error) {
-              console.error('Network check failed:', error)
+              console.error('Camera check failed:', error)
               passed = false
             }
+
+          } else if (id === 'mic') {
+            try {
+              const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+              const track = stream.getAudioTracks()[0]
+              passed = !!track && track.readyState === 'live' && track.enabled
+              stream.getTracks().forEach((t) => t.stop())
+            } catch (error) {
+              console.error('Microphone check failed:', error)
+              passed = false
+            }
+
+          } else if (id === 'screen') {
+            // Check screen resolution (minimum 1024x768)
+            passed = window.screen.width >= 1024 && window.screen.height >= 768
+          
+          } else if (id === 'network') {
+            // Round-trip to the interview server
+            if (navigator.onLine) {
+              const t0 = performance.now()
+              const res = await fetch(`${BASE_URL}/health`, { cache: 'no-store' })
+              passed = res.ok && performance.now() - t0 < 3000
+            }
           }
-        }
+        })()])
       } catch (error) {
         console.error(`${id} check failed:`, error)
         passed = false
@@ -343,11 +187,6 @@ export default function CandidateWaitingRoom() {
       <header className="bg-white border-b border-gray-200 px-6 h-14 flex items-center justify-between flex-shrink-0">
         <Logo size="sm" />
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5 text-sm text-gray-500 border border-gray-200 rounded-lg px-3 py-1.5">
-            <Clock size={13} className="text-gray-400" />
-            <span className="font-mono font-semibold text-gray-700">{fmtCountdown(countdown)}</span>
-            <span className="text-gray-400 text-xs">until session opens</span>
-          </div>
           <div className="flex items-center gap-2 bg-emerald-50 text-emerald-700 text-xs font-semibold px-3 py-1.5 rounded-full border border-emerald-200">
             <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
             Candidate Portal
@@ -481,15 +320,17 @@ export default function CandidateWaitingRoom() {
                 <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center mb-4">
                   <span className="text-white text-xl">📋</span>
                 </div>
-                <h2 className="font-bold text-gray-900 text-base mb-0.5">{ASSESSMENT.title}</h2>
-                <p className="text-xs text-gray-400 mb-4">{ASSESSMENT.company}</p>
+                <h2 className="font-bold text-gray-900 text-base mb-0.5">{session?.title || 'Loading…'}</h2>
+                <p className="text-xs text-gray-400 mb-4">
+                  {session?.candidate_role || 'Technical assessment'}
+                </p>
 
                 <div className="space-y-2.5">
                   {[
-                    ['Duration', ASSESSMENT.duration],
-                    ['Problems', `${ASSESSMENT.problems} questions`],
-                    ['Difficulty', ASSESSMENT.difficulty],
-                    ['Timer starts', ASSESSMENT.starts],
+                    ['Candidate', session?.candidate_name || candidateSession.user?.full_name || '—'],
+                    ['Duration', session ? `${session.duration_minutes} minutes` : '—'],
+                    ['Problems', problemCount ? `${problemCount} questions` : 'All available'],
+                    ['Timer starts', 'When you click Begin'],
                   ].map(([k, v]) => (
                     <div key={k} className="flex justify-between items-center text-sm">
                       <span className="text-gray-400 font-medium">{k}</span>
@@ -523,17 +364,24 @@ export default function CandidateWaitingRoom() {
                 </ul>
               </div>
 
+              {error && (
+                <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl p-3">
+                  <AlertTriangle size={14} className="text-red-500 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs text-red-600">{error}</p>
+                </div>
+              )}
+
               {/* Begin button */}
               <button
-                disabled={!canBegin}
-                onClick={() => navigate('/candidate/interview')}
+                disabled={!canBegin || joining || !session}
+                onClick={beginInterview}
                 className={`w-full flex items-center justify-center gap-2.5 font-bold text-sm py-4 rounded-2xl transition-all ${
                   canBegin
                     ? 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-lg shadow-emerald-200'
                     : 'bg-gray-100 text-gray-400 cursor-not-allowed'
                 }`}
               >
-                Begin Interview
+                {joining ? 'Starting…' : 'Begin Interview'}
                 <ChevronRight size={18} />
               </button>
 

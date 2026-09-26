@@ -11,7 +11,7 @@
  * }
  */
 
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+import { BASE_URL, getAuthToken } from './api'
 
 export const LANGUAGES = ['JavaScript', 'TypeScript', 'Python', 'Java', 'C++']
 
@@ -38,7 +38,7 @@ function normalise(r) {
 // ─── Run all test cases via backend proxy ─────────────────────────────────────
 
 export async function runAllTestCases({ code, language, testCases }) {
-  const token = localStorage.getItem('access_token')
+  const token = getAuthToken()
   const headers = { 'Content-Type': 'application/json' }
   if (token) headers['Authorization'] = `Bearer ${token}`
 
@@ -74,7 +74,7 @@ export async function runAllTestCases({ code, language, testCases }) {
 // ─── Run single custom stdin via backend proxy ────────────────────────────────
 
 export async function runTestCase({ code, language, stdin, expected }) {
-  const token = localStorage.getItem('access_token')
+  const token = getAuthToken()
   const headers = { 'Content-Type': 'application/json' }
   if (token) headers['Authorization'] = `Bearer ${token}`
 

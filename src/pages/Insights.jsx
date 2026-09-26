@@ -1,40 +1,38 @@
-import React from 'react'
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts'
+import React, { useEffect, useState } from 'react'
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { TrendingUp, Users, CheckCircle, AlertTriangle } from 'lucide-react'
-
-const monthlyData = [
-  { month: 'Jul', interviews: 42, passed: 28, flagged: 6 },
-  { month: 'Aug', interviews: 58, passed: 38, flagged: 9 },
-  { month: 'Sep', interviews: 51, passed: 34, flagged: 7 },
-  { month: 'Oct', interviews: 74, passed: 52, flagged: 11 },
-  { month: 'Nov', interviews: 67, passed: 48, flagged: 8 },
-  { month: 'Dec', interviews: 89, passed: 63, flagged: 14 },
-]
-
-const scoreDistribution = [
-  { range: '0-20', count: 4 },
-  { range: '21-40', count: 8 },
-  { range: '41-60', count: 15 },
-  { range: '61-80', count: 32 },
-  { range: '81-100', count: 28 },
-]
+import { analyticsAPI } from '../services/api'
 
 export default function Insights() {
+  const [overview, setOverview] = useState(null)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    analyticsAPI.overview()
+      .then(({ data }) => setOverview(data))
+      .catch(() => setError('Could not load insights.'))
+  }, [])
+
+  const monthlyData = overview?.monthly || []
+  const scoreDistribution = overview?.score_distribution || []
+
   return (
     <div className="p-6 space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Insights</h1>
-        <p className="text-gray-500 text-sm mt-0.5">Platform-wide analytics and hiring trends</p>
+        <p className="text-gray-500 text-sm mt-0.5">Hiring trends across all of your interviews</p>
       </div>
 
+      {error && <p className="text-sm text-red-600">{error}</p>}
+
       {/* KPIs */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
-          { label: 'Total Interviews (YTD)', value: '381', icon: Users, color: 'blue', delta: '+18%' },
-          { label: 'Avg. Score', value: '76.4', icon: TrendingUp, color: 'green', delta: '+3.2%' },
-          { label: 'Pass Rate', value: '68%', icon: CheckCircle, color: 'emerald', delta: '+5%' },
-          { label: 'Risk Signals', value: '55', icon: AlertTriangle, color: 'red', delta: '-12%' },
-        ].map(({ label, value, icon: Icon, color, delta }) => (
+          { label: 'Total Interviews', value: overview?.total_interviews ?? '—', icon: Users, color: 'blue', hint: overview ? `${overview.completed} completed` : '' },
+          { label: 'Avg. Score', value: overview?.avg_score ?? '—', icon: TrendingUp, color: 'green', hint: 'of scored interviews' },
+          { label: 'Pass Rate', value: overview?.pass_rate != null ? `${overview.pass_rate}%` : '—', icon: CheckCircle, color: 'emerald', hint: 'final score ≥ 70' },
+          { label: 'High-Risk Signals', value: overview?.high_risk_signals ?? '—', icon: AlertTriangle, color: 'red', hint: overview ? `${overview.flagged_sessions} flagged sessions` : '' },
+        ].map(({ label, value, icon: Icon, color, hint }) => (
           <div key={label} className="bg-white rounded-2xl border border-gray-100 p-5">
             <div className={`w-9 h-9 rounded-xl flex items-center justify-center mb-3 ${
               color === 'blue' ? 'bg-blue-50 text-blue-600' :
@@ -46,7 +44,7 @@ export default function Insights() {
             </div>
             <p className="text-2xl font-extrabold text-gray-900">{value}</p>
             <p className="text-xs text-gray-400 mt-0.5">{label}</p>
-            <span className="text-xs font-semibold text-emerald-600 mt-1 block">{delta}</span>
+            <span className="text-xs text-gray-400 mt-1 block">{hint}</span>
           </div>
         ))}
       </div>
@@ -61,11 +59,11 @@ export default function Insights() {
               <BarChart data={monthlyData} barGap={4}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
                 <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
                 <Tooltip contentStyle={{ borderRadius: 10, border: '1px solid #e5e7eb', fontSize: 12 }} />
-                <Bar dataKey="interviews" fill="#BFDBFE" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="passed" fill="#2563EB" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="flagged" fill="#FCA5A5" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="interviews" name="Interviews" fill="#BFDBFE" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="passed" name="Passed" fill="#2563EB" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="flagged" name="Flagged" fill="#FCA5A5" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -74,15 +72,15 @@ export default function Insights() {
         {/* Score distribution */}
         <div className="bg-white rounded-2xl border border-gray-100 p-5">
           <h2 className="font-semibold text-gray-900 mb-1">Score Distribution</h2>
-          <p className="text-xs text-gray-400 mb-4">Candidate score breakdown across all sessions</p>
+          <p className="text-xs text-gray-400 mb-4">Final scores you've given, across all sessions</p>
           <div className="h-52">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={scoreDistribution}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
                 <XAxis dataKey="range" tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
                 <Tooltip contentStyle={{ borderRadius: 10, border: '1px solid #e5e7eb', fontSize: 12 }} />
-                <Bar dataKey="count" fill="#2563EB" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="count" name="Candidates" fill="#2563EB" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>

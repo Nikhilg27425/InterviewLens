@@ -1,69 +1,42 @@
-import React, { useState, useEffect, useRef } from 'react'
-import { Link, useParams, useSearchParams } from 'react-router-dom'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import {
-  Maximize2, Square, Clock, AlertTriangle, CheckCircle,
-  Info, Send, MessageSquare, Copy, Eye, MoreVertical,
-  ChevronDown, Activity, Wifi, WifiOff, ShieldAlert,
+  Square, Clock, AlertTriangle, CheckCircle,
+  Info, Send, Copy, Check, Play, Loader,
+  ChevronDown, Activity, Wifi, WifiOff, Users,
 } from 'lucide-react'
 import { BarChart, Bar, ResponsiveContainer, XAxis } from 'recharts'
 import CodeEditorPane from '../components/CodeEditorPane'
-import { PROBLEMS } from '../data/problems'
+import NewSessionModal from '../components/NewSessionModal'
 import { useInterviewSocket } from '../hooks/useInterviewSocket'
 import { useWebRTC } from '../hooks/useWebRTC'
 import { sessionsAPI, signalsAPI } from '../services/api'
+import { loadSessionProblems } from '../services/problems'
 
-// ─── Static seed data ─────────────────────────────────────────────────────────
+const ACTIVITY_BUCKET_MS = 15000
+const ACTIVITY_BUCKETS = 20
+const MAX_SIGNALS = 30
 
-const SIGNALS = [
-  {
-    type: 'alert',
-    title: 'Multiple Faces Detected',
-    time: '14:22:10',
-    desc: 'The camera detected more than one person in the frame for 3 seconds.',
-  },
-  {
-    type: 'info',
-    title: 'Tab Switch Detected',
-    time: '14:18:45',
-    desc: 'Candidate switched focus to another browser tab.',
-  },
-  {
-    type: 'success',
-    title: 'Passes Test Case #4',
-    time: '14:15:30',
-    desc: 'Solution correctly handles empty array input.',
-  },
-  {
-    type: 'alert',
-    title: 'Code Similarity Alert',
-    time: '14:12:05',
-    desc: 'Significant code block matches a known online resource (GitHub/StackOverflow).',
-  },
-]
+const titleCase = (s = '') => s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+const RISK_TO_CARD = { critical: 'alert', high: 'alert', medium: 'info', low: 'info', info: 'info' }
 
-const SEED_CHAT = [
-  {
-    id: 1, sender: 'ai', name: 'InterviewLens AI',
-    text: 'The candidate is struggling with the space complexity of the current approach. Would you like me to hint about using a Hash Map?',
-    time: '14:20',
-  },
-  {
-    id: 2, sender: 'interviewer',
-    text: "Let's wait another minute to see if they optimize it on their own.",
-    time: '14:21',
-  },
-  {
-    id: 3, sender: 'ai', name: 'InterviewLens AI',
-    text: 'Detected a risk signal: Candidate switched tabs. Monitoring for external clipboard activity.',
-    time: '14:22',
-  },
-]
+function describeDetail(detail) {
+  if (!detail) return null
+  let d = detail
+  if (typeof d === 'string') {
+    try { d = JSON.parse(d) } catch { return d }
+  }
+  if (typeof d !== 'object') return String(d)
+  if (d.length != null) return `${d.length} characters${d.preview ? `: “${d.preview}…”` : ''}`
+  return Object.entries(d).map(([k, v]) => `${k}: ${v}`).join(', ')
+}
 
-const ENG_DATA = [
-  { t:'1',v:3},{t:'2',v:5},{t:'3',v:4},{t:'4',v:6},
-  {t:'5',v:8},{t:'6',v:7},{t:'7',v:9},{t:'8',v:8},
-  {t:'9',v:10},{t:'10',v:9},
-]
+const signalCard = ({ signal_type, risk_level, detail, timestamp }) => ({
+  type: RISK_TO_CARD[risk_level] || 'info',
+  title: titleCase(signal_type),
+  time: (timestamp ? new Date(timestamp) : new Date()).toLocaleTimeString(),
+  desc: describeDetail(detail) || `${titleCase(signal_type)} detected`,
+})
 
 function SignalCard({ type, title, time, desc }) {
   const styles = {
@@ -92,130 +65,200 @@ function SignalCard({ type, title, time, desc }) {
   )
 }
 
+// ─── No session selected ──────────────────────────────────────────────────────
+
+function NoSession() {
+  const [showNew, setShowNew] = useState(false)
+  return (
+    <div className="flex items-center justify-center h-[calc(100vh-3.5rem)] bg-gray-50">
+      <div className="text-center max-w-sm">
+        <Users size={44} className="text-gray-300 mx-auto mb-4" />
+        <h2 className="text-lg font-bold text-gray-900 mb-1">No session selected</h2>
+        <p className="text-sm text-gray-500 mb-5">
+          Create a new interview, or open one from the Interviews list to monitor it live.
+        </p>
+        <div className="flex items-center justify-center gap-3">
+          <Link to="/interviews" className="border border-gray-200 rounded-lg px-4 py-2 text-sm font-medium text-gray-700 hover:bg-white">
+            View interviews
+          </Link>
+          <button
+            onClick={() => setShowNew(true)}
+            className="flex items-center gap-2 bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-blue-700"
+          >
+            <Play size={13} fill="white" /> New session
+          </button>
+        </div>
+      </div>
+      {showNew && <NewSessionModal onClose={() => setShowNew(false)} />}
+    </div>
+  )
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function LiveSession() {
   const [searchParams] = useSearchParams()
-  const sessionId = searchParams.get('session') || null
+  const sessionId = searchParams.get('session')
+  if (!sessionId) return <NoSession />
+  return <LiveSessionView key={sessionId} sessionId={sessionId} />
+}
 
-  console.log('[LiveSession] Session ID from URL:', sessionId)
+function LiveSessionView({ sessionId }) {
+  const navigate = useNavigate()
 
-  // Session data
-  const [session, setSession] = useState(null)
-  const [loading, setLoading] = useState(true)
-
-  const [timeLeft,   setTimeLeft]   = useState(40 * 60 + 49)
-  const [messages,   setMessages]   = useState(SEED_CHAT)
-  const [inputMsg,   setInputMsg]   = useState('')
+  const [session, setSession]       = useState(null)
+  const [problems, setProblems]     = useState([])
+  const [loadError, setLoadError]   = useState('')
+  const [now, setNow]               = useState(Date.now())
+  const [messages, setMessages]     = useState([])
+  const [inputMsg, setInputMsg]     = useState('')
   const [problemIdx, setProblemIdx] = useState(0)
-  const [lang,       setLang]       = useState('JavaScript')
-  const [codes,      setCodes]      = useState(() =>
-    Object.fromEntries(PROBLEMS.map((p) => [p.id, { ...p.starterCode }]))
-  )
+  const [lang, setLang]             = useState('JavaScript')
+  const [codes, setCodes]           = useState({})
   const [showProblemPicker, setShowProblemPicker] = useState(false)
-  const [liveSignals, setLiveSignals] = useState(SIGNALS)
+  const [liveSignals, setLiveSignals] = useState([])
+  const [candidateOnline, setCandidateOnline] = useState(false)
+  const [notes, setNotes]           = useState('')
+  const [notesSaved, setNotesSaved] = useState(true)
+  const [busy, setBusy]             = useState(false)
+  const [copied, setCopied]         = useState(false)
+  const [activity, setActivity]     = useState(() =>
+    Array.from({ length: ACTIVITY_BUCKETS }, (_, i) => ({ t: String(i), v: 0 })))
+  const activityCount = useRef(0)
 
-  const problem = PROBLEMS[problemIdx]
+  const problem = problems[problemIdx]
 
-  // ── WebSocket — receive live updates from candidate ──
-  const { connected, lastMessage, send } = useInterviewSocket(sessionId)
+  // ── Load session + problems + signal history ──
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const { data } = await sessionsAPI.get(sessionId)
+        const probs = await loadSessionProblems(data)
+        if (cancelled) return
+        setSession(data)
+        setNotes(data.notes || '')
+        setProblems(probs)
+        setCodes(Object.fromEntries(probs.map((p) => [p.id, { ...p.starterCode }])))
+      } catch (err) {
+        if (!cancelled) setLoadError(err.response?.data?.detail || 'Could not load this session.')
+      }
+    })()
+    signalsAPI.forSession(sessionId)
+      .then(({ data }) => {
+        if (!cancelled) setLiveSignals(data.slice(-MAX_SIGNALS).reverse().map(signalCard))
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [sessionId])
 
-  // ── WebRTC video streaming (interviewer receives candidate's video) ──
-  const { remoteStream, connectionState } = useWebRTC(
-    send,
-    lastMessage,
-    'interviewer'
-  )
+  // ── WebSocket + WebRTC ──
+  const { connected, send, subscribe } = useInterviewSocket(sessionId)
+  const { remoteStream, connectionState } = useWebRTC({
+    role: 'interviewer', send, subscribe, connected,
+  })
   const remoteVideoRef = useRef(null)
-
-  // ── Display remote video stream ──
   useEffect(() => {
     if (remoteVideoRef.current && remoteStream) {
       remoteVideoRef.current.srcObject = remoteStream
     }
   }, [remoteStream])
 
-  // ── Load session data ──
-  useEffect(() => {
-    if (!sessionId) {
-      setLoading(false)
-      return
-    }
-    
-    sessionsAPI.get(sessionId)
-      .then(({ data }) => {
-        setSession(data)
-        // Set timer based on session duration
-        if (data.duration_minutes) {
-          setTimeLeft(data.duration_minutes * 60)
-        }
-        setLoading(false)
-      })
-      .catch((err) => {
-        console.error('Failed to load session:', err)
-        setLoading(false)
-      })
-  }, [sessionId])
+  const addCard = useCallback((card) => {
+    setLiveSignals((prev) => [card, ...prev].slice(0, MAX_SIGNALS))
+  }, [])
 
-  useEffect(() => {
-    if (!lastMessage) return
-    const msg = lastMessage
+  const problemsRef = useRef(problems)
+  problemsRef.current = problems
 
-    // Live code sync from candidate
-    if (msg.type === 'code_update' && msg.code !== undefined) {
-      const matchIdx = PROBLEMS.findIndex(p => String(p.id) === String(msg.problem_id))
-      if (matchIdx >= 0) {
-        const p = PROBLEMS[matchIdx]
-        setCodes(prev => ({
-          ...prev,
-          [p.id]: { ...prev[p.id], [msg.language || lang]: msg.code }
-        }))
-        if (matchIdx !== problemIdx) setProblemIdx(matchIdx)
-        if (msg.language && msg.language !== lang) setLang(msg.language)
+  useEffect(() => subscribe((msg) => {
+    switch (msg.type) {
+      case 'code_update': {
+        setCandidateOnline(true)
+        activityCount.current++
+        const idx = problemsRef.current.findIndex((p) => String(p.id) === String(msg.problem_id))
+        if (idx < 0 || msg.code == null) return
+        const pid = problemsRef.current[idx].id
+        setCodes((prev) => ({ ...prev, [pid]: { ...prev[pid], [msg.language]: msg.code } }))
+        setProblemIdx(idx)
+        if (msg.language) setLang(msg.language)
+        return
       }
-    }
-
-    // Incoming proctoring signal
-    if (msg.type === 'signal') {
-      const riskColors = { critical:'alert', high:'alert', medium:'info', low:'info', info:'info' }
-      setLiveSignals(prev => [{
-        type: riskColors[msg.risk_level] || 'info',
-        title: msg.signal_type.replace(/_/g,' ').replace(/\b\w/g, c => c.toUpperCase()),
-        time: new Date().toLocaleTimeString(),
-        desc: msg.detail ? (typeof msg.detail === 'string' ? msg.detail : JSON.stringify(msg.detail)) : `${msg.signal_type} detected`,
-      }, ...prev.slice(0, 9)])
-    }
-
-    // Incoming chat
-    if (msg.type === 'chat' && msg.role === 'candidate') {
-      setMessages(prev => [...prev, {
-        id: Date.now(), sender: 'candidate',
-        text: msg.text, time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
-      }])
-    }
-  }, [lastMessage])
-
-  // Load session signals from DB on mount
-  useEffect(() => {
-    if (!sessionId) return
-    signalsAPI.forSession(sessionId)
-      .then(({ data }) => {
-        if (data?.length) {
-          setLiveSignals(data.slice(0,10).map(s => ({
-            type: ['critical','high'].includes(s.risk_level) ? 'alert' : 'info',
-            title: s.signal_type.replace(/_/g,' ').replace(/\b\w/g, c => c.toUpperCase()),
-            time: new Date(s.timestamp).toLocaleTimeString(),
-            desc: s.detail || s.signal_type,
-          })))
+      case 'signal':
+        addCard(signalCard(msg))
+        return
+      case 'code_run': {
+        const title = problemsRef.current.find((p) => String(p.id) === String(msg.problem_id))?.title || 'Problem'
+        addCard({
+          type: msg.is_accepted ? 'success' : 'alert',
+          title: `${msg.is_final ? 'Final submission' : 'Code run'}: ${msg.passed}/${msg.total} passed`,
+          time: new Date().toLocaleTimeString(),
+          desc: `${title} · ${msg.language}`,
+        })
+        return
+      }
+      case 'similarity_alert':
+        addCard({
+          type: 'alert',
+          title: 'Code Similarity Alert',
+          time: new Date().toLocaleTimeString(),
+          desc: `${Math.round(msg.overall_score)}% similar to reference code (${msg.language}).`,
+        })
+        return
+      case 'candidate_submitted':
+        addCard({ type: 'success', title: 'Candidate submitted', time: new Date().toLocaleTimeString(), desc: 'The candidate submitted their final answers.' })
+        return
+      case 'chat':
+        if (msg.role === 'candidate') {
+          setMessages((prev) => [...prev, {
+            id: Date.now(), sender: 'candidate', text: msg.text,
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          }])
         }
-      })
-      .catch(() => {})
-  }, [sessionId])
+        return
+      case 'user_joined':
+      case 'user_left':
+        if (msg.role === 'candidate') {
+          setCandidateOnline(msg.type === 'user_joined')
+          addCard({
+            type: 'info',
+            title: msg.type === 'user_joined' ? 'Candidate connected' : 'Candidate disconnected',
+            time: new Date().toLocaleTimeString(),
+            desc: msg.type === 'user_joined' ? 'The candidate joined the session.' : 'The candidate left or lost connection.',
+          })
+          // Session goes active when the candidate begins — pick up the new status/start time
+          if (msg.type === 'user_joined') {
+            sessionsAPI.get(sessionId).then(({ data }) => setSession(data)).catch(() => {})
+          }
+        }
+        return
+      default:
+    }
+  }), [subscribe, addCard, sessionId])
 
   useEffect(() => {
-    const t = setInterval(() => setTimeLeft((s) => (s > 0 ? s - 1 : 0)), 1000)
+    if (connectionState === 'connected') setCandidateOnline(true)
+  }, [connectionState])
+
+  // ── Clock + activity buckets ──
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(t)
   }, [])
+  useEffect(() => {
+    const t = setInterval(() => {
+      const v = activityCount.current
+      activityCount.current = 0
+      setActivity((prev) => [...prev.slice(1), { t: String(Date.now()), v }])
+    }, ACTIVITY_BUCKET_MS)
+    return () => clearInterval(t)
+  }, [])
+
+  const totalSeconds = (session?.duration_minutes || 60) * 60
+  const startedAt = session?.started_at ? new Date(session.started_at).getTime() : null
+  const timeLeft = startedAt ? Math.max(0, Math.round(totalSeconds - (now - startedAt) / 1000)) : totalSeconds
+  const isLive = session?.status === 'active'
+  const isOver = session?.status === 'completed' || session?.status === 'cancelled'
 
   const fmt = (s) => {
     const m = Math.floor(s / 60).toString().padStart(2, '0')
@@ -223,28 +266,76 @@ export default function LiveSession() {
     return `${m}:${sec}`
   }
 
-  const handleCodeChange = (val) => {
-    setCodes((prev) => ({
-      ...prev,
-      [problem.id]: { ...prev[problem.id], [lang]: val },
-    }))
+  const startSession = async () => {
+    setBusy(true)
+    try {
+      const { data } = await sessionsAPI.start(sessionId)
+      setSession(data)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const endSession = async () => {
+    if (!window.confirm('End this interview for the candidate? This cannot be undone.')) return
+    setBusy(true)
+    try {
+      await saveNotes()
+      await sessionsAPI.end(sessionId)
+      send({ type: 'end_session' })
+      navigate(`/interviews/${sessionId}`)
+    } catch {
+      setBusy(false)
+    }
+  }
+
+  const saveNotes = async () => {
+    if (notesSaved) return
+    await sessionsAPI.update(sessionId, { notes })
+    setNotesSaved(true)
+  }
+
+  const copyToken = () => {
+    navigator.clipboard.writeText(session.access_token).catch(() => {})
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
   }
 
   const sendMessage = () => {
-    if (!inputMsg.trim()) return
-    // Send over WS if connected
-    if (sessionId) send({ type: 'chat', text: inputMsg })
-    setMessages([...messages, {
-      id: Date.now(), sender: 'interviewer',
-      text: inputMsg, time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+    const text = inputMsg.trim()
+    if (!text) return
+    const delivered = send({ type: 'chat', text })
+    setMessages((prev) => [...prev, {
+      id: Date.now(), sender: 'interviewer', text, failed: !delivered,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     }])
     setInputMsg('')
   }
 
-  // Toolbar slot for the editor — "Complete Evaluation" button
+  if (loadError) {
+    return (
+      <div className="flex items-center justify-center h-[calc(100vh-3.5rem)] bg-gray-50">
+        <div className="bg-white border border-red-200 rounded-2xl p-6 max-w-md text-center">
+          <AlertTriangle className="mx-auto text-red-500 mb-3" />
+          <p className="font-semibold text-gray-900 mb-1">Unable to open session</p>
+          <p className="text-sm text-gray-500 mb-4">{loadError}</p>
+          <Link to="/interviews" className="text-sm font-semibold text-blue-600 hover:underline">Back to interviews</Link>
+        </div>
+      </div>
+    )
+  }
+
+  if (!session || !problem) {
+    return (
+      <div className="flex items-center justify-center h-[calc(100vh-3.5rem)]">
+        <Loader className="animate-spin text-blue-600" />
+      </div>
+    )
+  }
+
   const toolbarSlot = (
     <Link
-      to={`/interviews/1`}
+      to={`/interviews/${sessionId}`}
       className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors"
     >
       Complete Evaluation
@@ -256,11 +347,11 @@ export default function LiveSession() {
 
       {/* ── Top bar ── */}
       <div className="bg-white border-b border-gray-200 px-5 py-3 flex items-center justify-between flex-shrink-0">
-        <div className="flex items-center gap-3">
-          <h1 className="text-lg font-bold text-gray-900">Live Interview Session</h1>
-          <div className="flex items-center gap-1.5 bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-sm font-medium border border-blue-100">
+        <div className="flex items-center gap-3 min-w-0">
+          <h1 className="text-lg font-bold text-gray-900 truncate">{session.title}</h1>
+          <div className="flex items-center gap-1.5 bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-sm font-medium border border-blue-100 flex-shrink-0">
             <Clock size={13} />
-            {fmt(timeLeft)} remaining
+            {isOver ? 'Ended' : startedAt ? `${fmt(timeLeft)} remaining` : `${session.duration_minutes} min · not started`}
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -275,7 +366,7 @@ export default function LiveSession() {
             </button>
             {showProblemPicker && (
               <div className="absolute right-0 mt-1 w-56 bg-white border border-gray-200 rounded-xl shadow-lg z-50 py-1">
-                {PROBLEMS.map((p, i) => (
+                {problems.map((p, i) => (
                   <button
                     key={p.id}
                     onClick={() => { setProblemIdx(i); setShowProblemPicker(false) }}
@@ -292,12 +383,24 @@ export default function LiveSession() {
               </div>
             )}
           </div>
-          <button className="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50">
-            <Maximize2 size={13} /> Full Screen
-          </button>
-          <button className="flex items-center gap-2 border border-red-200 text-red-500 rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-red-50">
-            <Square size={11} fill="currentColor" /> End Session
-          </button>
+          {!isLive && !isOver && (
+            <button
+              onClick={startSession}
+              disabled={busy}
+              className="flex items-center gap-2 bg-blue-600 text-white rounded-lg px-3 py-1.5 text-sm font-semibold hover:bg-blue-700 disabled:opacity-60"
+            >
+              <Play size={11} fill="white" /> Start Session
+            </button>
+          )}
+          {!isOver && (
+            <button
+              onClick={endSession}
+              disabled={busy}
+              className="flex items-center gap-2 border border-red-200 text-red-500 rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-red-50 disabled:opacity-60"
+            >
+              <Square size={11} fill="currentColor" /> End Session
+            </button>
+          )}
         </div>
       </div>
 
@@ -310,36 +413,39 @@ export default function LiveSession() {
           <div className="p-4 text-center border-b border-gray-100">
             <div className="relative inline-block mb-3">
               <div className="w-14 h-14 rounded-full bg-gradient-to-br from-blue-400 to-indigo-600 flex items-center justify-center text-white text-lg font-bold mx-auto">
-                {session?.candidate_name?.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || 'CA'}
+                {session.candidate_name?.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2) || 'CA'}
               </div>
               <span className={`absolute bottom-0 right-0 w-3.5 h-3.5 border-2 border-white rounded-full ${
-                connectionState === 'connected' ? 'bg-green-500' : 'bg-gray-400'
+                candidateOnline ? 'bg-green-500' : 'bg-gray-400'
               }`} />
             </div>
-            <p className="font-bold text-gray-900 text-sm">{session?.candidate_name || 'Candidate'}</p>
-            <p className="text-xs text-gray-500 mt-0.5">{session?.candidate_role || 'Role not specified'}</p>
+            <p className="font-bold text-gray-900 text-sm">{session.candidate_name || 'Candidate'}</p>
+            <p className="text-xs text-gray-500 mt-0.5">{session.candidate_role || 'Role not specified'}</p>
             <div className="flex items-center justify-center gap-1.5 mt-2">
               <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
-                session?.status === 'active' 
-                  ? 'bg-green-100 text-green-700' 
-                  : 'bg-gray-100 text-gray-600'
+                isLive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'
               }`}>
-                {session?.status?.toUpperCase() || 'LOADING'}
+                {session.status.toUpperCase()}
               </span>
-              {session?.access_token && (
-                <span className="bg-gray-100 text-gray-600 text-xs font-mono px-2 py-0.5 rounded-full">
-                  {session.access_token.split('-')[0]}
-                </span>
-              )}
             </div>
+            <button
+              onClick={copyToken}
+              title="Copy candidate access token"
+              className="mt-2 inline-flex items-center gap-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-mono px-2 py-1 rounded-lg"
+            >
+              {session.access_token}
+              {copied ? <Check size={11} className="text-emerald-600" /> : <Copy size={11} />}
+            </button>
             <div className="grid grid-cols-2 gap-1.5 mt-3 text-left">
-              <div>
+              <div className="min-w-0">
                 <p className="text-[10px] text-gray-400 font-semibold">EMAIL</p>
-                <p className="text-xs font-semibold text-gray-800 truncate">{session?.candidate_email?.split('@')[0] || '—'}</p>
+                <p className="text-xs font-semibold text-gray-800 truncate" title={session.candidate_email || ''}>
+                  {session.candidate_email || '—'}
+                </p>
               </div>
               <div>
                 <p className="text-[10px] text-gray-400 font-semibold">DURATION</p>
-                <p className="text-xs font-semibold text-gray-800">{session?.duration_minutes || 60} min</p>
+                <p className="text-xs font-semibold text-gray-800">{session.duration_minutes} min</p>
               </div>
             </div>
           </div>
@@ -352,6 +458,7 @@ export default function LiveSession() {
                   ref={remoteVideoRef}
                   autoPlay
                   playsInline
+                  muted
                   className="w-full aspect-video object-cover"
                 />
                 <div className="absolute top-2 left-2 bg-black/60 text-white text-[10px] font-semibold px-2 py-0.5 rounded flex items-center gap-1">
@@ -361,21 +468,14 @@ export default function LiveSession() {
                 <div className="absolute top-2 right-2 bg-black/60 text-white text-[10px] font-semibold px-2 py-0.5 rounded">
                   {connectionState}
                 </div>
-                <div className="absolute bottom-1.5 left-2">
-                  <p className="text-white text-xs font-semibold">
-                    {session?.candidate_name || 'Candidate'}
-                  </p>
-                  <p className="text-gray-300 text-[10px]">
-                    WebRTC: {connectionState}
-                  </p>
-                </div>
               </>
             ) : (
               <div className="w-full aspect-video flex items-center justify-center bg-gray-700">
-                <div className="text-center">
-                  <div className="w-12 h-12 border-4 border-gray-500 border-t-gray-300 rounded-full animate-spin mx-auto mb-3" />
-                  <p className="text-white text-sm">Connecting to candidate...</p>
-                  <p className="text-gray-400 text-xs mt-1">{connectionState}</p>
+                <div className="text-center px-2">
+                  {!isOver && <div className="w-8 h-8 border-4 border-gray-500 border-t-gray-300 rounded-full animate-spin mx-auto mb-2" />}
+                  <p className="text-white text-xs">
+                    {isOver ? 'Session ended' : candidateOnline ? 'Connecting video…' : 'Waiting for candidate…'}
+                  </p>
                 </div>
               </div>
             )}
@@ -385,93 +485,90 @@ export default function LiveSession() {
           <div className="p-3 border-t border-gray-100">
             <div className="flex items-center justify-between mb-1.5">
               <p className="text-xs font-semibold text-gray-700 flex items-center gap-1">
-                <Activity size={11} className="text-blue-500" /> Engagement
+                <Activity size={11} className="text-blue-500" /> Typing activity
               </p>
-              <span className="text-[10px] text-gray-400">Live</span>
+              <span className="text-[10px] text-gray-400">Last 5 min</span>
             </div>
             <div className="h-10">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={ENG_DATA} barSize={5}>
-                  <Bar dataKey="v" fill="#2563EB" radius={[2,2,0,0]} />
+                <BarChart data={activity} barSize={5}>
+                  <Bar dataKey="v" fill="#2563EB" radius={[2, 2, 0, 0]} isAnimationActive={false} />
                   <XAxis dataKey="t" hide />
                 </BarChart>
               </ResponsiveContainer>
             </div>
-            <div className="flex justify-between text-[10px] text-gray-400 mt-0.5">
-              <span>Low</span><span>Peak</span>
-            </div>
           </div>
 
-          {/* Quick actions */}
+          {/* Notes */}
           <div className="p-3 border-t border-gray-100 mt-auto">
-            <p className="text-xs font-semibold text-gray-600 mb-2">Quick Actions</p>
-            <div className="grid grid-cols-2 gap-1.5">
-              {[
-                { Icon: MessageSquare, label: 'Note' },
-                { Icon: Copy,          label: 'Copy' },
-                { Icon: Eye,           label: 'View CV' },
-                { Icon: MoreVertical,  label: 'More' },
-              ].map(({ Icon, label }) => (
-                <button key={label} className="flex items-center gap-1 border border-gray-200 rounded-lg px-2 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50">
-                  <Icon size={11} /> {label}
-                </button>
-              ))}
+            <div className="flex items-center justify-between mb-1.5">
+              <p className="text-xs font-semibold text-gray-600">Interviewer notes</p>
+              <span className="text-[10px] text-gray-400">{notesSaved ? 'Saved' : 'Unsaved'}</span>
             </div>
+            <textarea
+              value={notes}
+              onChange={(e) => { setNotes(e.target.value); setNotesSaved(false) }}
+              onBlur={() => saveNotes().catch(() => {})}
+              rows={4}
+              placeholder="Private notes, saved to the session…"
+              className="w-full text-xs border border-gray-200 rounded-lg p-2 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
           </div>
         </div>
 
-        {/* Center: code editor — real, editable, connected to Judge0 */}
+        {/* Center: candidate's code (mirrored live, read-only) */}
         <div className="flex-1 flex flex-col overflow-hidden">
           <CodeEditorPane
             key={`${problem.id}-${lang}`}
-            code={codes[problem.id][lang]}
-            onCodeChange={handleCodeChange}
+            code={codes[problem.id]?.[lang] ?? ''}
+            onCodeChange={() => {}}
             language={lang}
             onLanguageChange={setLang}
             problem={problem}
-            starterCode={problem.starterCode[lang]}
-            readOnly={false}
+            starterCode={problem.starterCode[lang] ?? ''}
+            readOnly
             showLanguageSwitcher
             toolbarSlot={toolbarSlot}
           />
         </div>
 
         {/* Right: signals + chat */}
-        <div className="w-68 flex-shrink-0 bg-white border-l border-gray-200 flex flex-col" style={{ width: 272 }}>
+        <div className="flex-shrink-0 bg-white border-l border-gray-200 flex flex-col" style={{ width: 272 }}>
           {/* Live signals */}
           <div className="p-4 border-b border-gray-100 flex-shrink-0">
             <div className="flex items-center justify-between mb-0.5">
               <h3 className="text-sm font-bold text-gray-900 flex items-center gap-1.5">
                 <span className="text-blue-500">⚡</span> Live Signals
-                <span className="bg-blue-600 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center ml-0.5">
+                <span className="bg-blue-600 text-white text-[10px] font-bold min-w-4 h-4 px-1 rounded-full flex items-center justify-center ml-0.5">
                   {liveSignals.length}
                 </span>
               </h3>
-              {sessionId && (
-                <div className={`flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full ${connected ? 'text-emerald-600 bg-emerald-50' : 'text-gray-400 bg-gray-100'}`}>
-                  {connected ? <Wifi size={10} /> : <WifiOff size={10} />}
-                  {connected ? 'Live' : 'Demo'}
-                </div>
-              )}
+              <div className={`flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full ${connected ? 'text-emerald-600 bg-emerald-50' : 'text-gray-400 bg-gray-100'}`}>
+                {connected ? <Wifi size={10} /> : <WifiOff size={10} />}
+                {connected ? 'Live' : 'Offline'}
+              </div>
             </div>
             <p className="text-xs text-gray-400">Neutral monitoring of interview events.</p>
           </div>
 
-          <div className="p-3 space-y-2 overflow-y-auto flex-shrink-0 max-h-56 border-b border-gray-100">
-            {liveSignals.map((s, i) => <SignalCard key={i} {...s} />)}
+          <div className="p-3 space-y-2 overflow-y-auto flex-shrink-0 max-h-72 border-b border-gray-100">
+            {liveSignals.length === 0 ? (
+              <p className="text-xs text-gray-400 text-center py-4">No events yet.</p>
+            ) : (
+              liveSignals.map((s, i) => <SignalCard key={i} {...s} />)
+            )}
           </div>
 
           {/* Chat */}
           <div className="flex-1 flex flex-col overflow-hidden">
             <div className="flex-1 overflow-y-auto p-3 space-y-3">
+              {messages.length === 0 && (
+                <p className="text-xs text-gray-400 text-center py-4">
+                  Messages you send appear on the candidate’s screen.
+                </p>
+              )}
               {messages.map((msg) => (
                 <div key={msg.id}>
-                  {msg.sender === 'ai' && (
-                    <div className="flex items-center gap-1.5 mb-1">
-                      <div className="w-5 h-5 bg-blue-100 rounded-full flex items-center justify-center text-[10px]">🤖</div>
-                      <p className="text-xs font-semibold text-blue-700">{msg.name}</p>
-                    </div>
-                  )}
                   <div className={`rounded-xl px-3 py-2 text-xs leading-relaxed ${
                     msg.sender === 'interviewer'
                       ? 'bg-blue-600 text-white ml-6'
@@ -479,8 +576,8 @@ export default function LiveSession() {
                   }`}>
                     {msg.text}
                   </div>
-                  <p className={`text-[10px] text-gray-400 mt-0.5 ${msg.sender === 'interviewer' ? 'text-right mr-1' : 'ml-1'}`}>
-                    {msg.time}
+                  <p className={`text-[10px] mt-0.5 ${msg.failed ? 'text-red-500' : 'text-gray-400'} ${msg.sender === 'interviewer' ? 'text-right mr-1' : 'ml-1'}`}>
+                    {msg.failed ? 'Not delivered — offline' : msg.time}
                   </p>
                 </div>
               ))}
@@ -491,26 +588,18 @@ export default function LiveSession() {
               <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2">
                 <input
                   type="text"
-                  placeholder="Ask AI for a hint…"
+                  placeholder="Message the candidate…"
                   value={inputMsg}
                   onChange={(e) => setInputMsg(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
                   className="flex-1 bg-transparent text-xs text-gray-700 placeholder-gray-400 outline-none"
                 />
-                <span className="text-[10px] text-gray-400 font-medium">AI</span>
                 <button
                   onClick={sendMessage}
                   className="w-5 h-5 bg-blue-600 rounded-md flex items-center justify-center hover:bg-blue-700 transition-colors"
                 >
                   <Send size={10} className="text-white" />
                 </button>
-              </div>
-              <div className="flex gap-2 mt-1.5 flex-wrap">
-                {['Analyze', 'Plagiarism', 'Hint'].map((a) => (
-                  <button key={a} className="text-[10px] text-blue-600 font-medium hover:underline">
-                    {a}
-                  </button>
-                ))}
               </div>
             </div>
           </div>

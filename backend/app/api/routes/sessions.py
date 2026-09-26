@@ -8,7 +8,7 @@ from sqlalchemy.orm import selectinload
 
 from app.db.base import get_db
 from app.models.session import InterviewSession, SessionStatus
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.schemas.session import SessionCreate, SessionUpdate, SessionOut, SessionSummary
 from app.api.deps import get_current_user, require_interviewer
 
@@ -80,7 +80,9 @@ async def get_session(
     if not session:
         raise HTTPException(404, "Session not found")
     # Interviewers can only see their own; candidates can see their assigned session
-    if current_user.role == "interviewer" and session.interviewer_id != current_user.id:
+    if current_user.role == UserRole.interviewer and session.interviewer_id != current_user.id:
+        raise HTTPException(403, "Not your session")
+    if current_user.role == UserRole.candidate and session.candidate_id != current_user.id:
         raise HTTPException(403, "Not your session")
     return session
 
@@ -117,10 +119,12 @@ async def start_session(
     session = result.scalar_one_or_none()
     if not session:
         raise HTTPException(404, "Session not found")
+    if session.interviewer_id != current_user.id:
+        raise HTTPException(403, "Not your session")
     if session.status == SessionStatus.active:
         return session  # idempotent
     session.status = SessionStatus.active
-    session.started_at = datetime.now(timezone.utc)
+    session.started_at = session.started_at or datetime.now(timezone.utc)
     await db.flush()
     await db.refresh(session)
     return session
@@ -136,10 +140,35 @@ async def end_session(
     session = result.scalar_one_or_none()
     if not session:
         raise HTTPException(404, "Session not found")
+    if session.interviewer_id != current_user.id:
+        raise HTTPException(403, "Not your session")
     session.status = SessionStatus.completed
     session.ended_at = datetime.now(timezone.utc)
     await db.flush()
     await db.refresh(session)
+    return session
+
+
+@router.post("/{session_id}/join", response_model=SessionOut)
+async def join_session(
+    session_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Candidate clicks "Begin Interview" — the session goes live and the clock starts."""
+    result = await db.execute(select(InterviewSession).where(InterviewSession.id == session_id))
+    session = result.scalar_one_or_none()
+    if not session:
+        raise HTTPException(404, "Session not found")
+    if session.candidate_id != current_user.id:
+        raise HTTPException(403, "Not your session")
+    if session.status in (SessionStatus.completed, SessionStatus.cancelled):
+        raise HTTPException(410, "Session is no longer active")
+    if session.status != SessionStatus.active:
+        session.status = SessionStatus.active
+        session.started_at = session.started_at or datetime.now(timezone.utc)
+        await db.flush()
+        await db.refresh(session)
     return session
 
 

@@ -12,7 +12,7 @@ from app.models.submission import Submission
 from app.models.user import User
 from app.schemas.submission import RunRequest, RunResponse, TestCaseResult, SubmissionOut
 from app.services import judge0 as j0
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_session_for_user
 from app.websocket.manager import manager  # broadcast results to interviewer room
 
 router = APIRouter(prefix="/submissions", tags=["submissions"])
@@ -26,9 +26,7 @@ async def run_code(
     current_user: User = Depends(get_current_user),
 ):
     # Validate session
-    sess = (await db.execute(select(InterviewSession).where(InterviewSession.id == body.session_id))).scalar_one_or_none()
-    if not sess:
-        raise HTTPException(404, "Session not found")
+    sess = await get_session_for_user(body.session_id, db, current_user)
     if sess.status not in (SessionStatus.active, SessionStatus.waiting):
         raise HTTPException(400, "Session is not active")
 
@@ -125,8 +123,9 @@ async def run_custom(
     source_code: str,
     stdin: str = "",
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
+    await get_session_for_user(session_id, db, current_user)
     try:
         result = await j0.run_custom(source_code, language, stdin)
     except Exception as e:
@@ -138,8 +137,9 @@ async def run_custom(
 async def list_session_submissions(
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
+    await get_session_for_user(session_id, db, current_user)
     result = await db.execute(
         select(Submission)
         .where(Submission.session_id == session_id)

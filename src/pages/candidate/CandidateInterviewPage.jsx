@@ -1,21 +1,35 @@
-import React, { useState, useEffect, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
+import { Navigate, useNavigate } from 'react-router-dom'
 import {
   Clock, ChevronLeft, ChevronRight, CheckCircle,
   AlertTriangle, Send, Maximize2, Minimize2,
-  List, X, HelpCircle, AlertCircle, Wifi, WifiOff,
+  List, X, HelpCircle, AlertCircle, Wifi, WifiOff, Loader, MessageSquare,
 } from 'lucide-react'
 import Logo from '../../components/Logo'
 import CodeEditorPane from '../../components/CodeEditorPane'
-import { PROBLEMS } from '../../data/problems'
 import { useProctoring } from '../../hooks/useProctoring'
 import { useInterviewSocket } from '../../hooks/useInterviewSocket'
 import { useWebRTC } from '../../hooks/useWebRTC'
-import { analyticsAPI, submissionsAPI } from '../../services/api'
+import { analyticsAPI, candidateSession, sessionsAPI, submissionsAPI } from '../../services/api'
+import { loadSessionProblems } from '../../services/problems'
 
-// Get session context from localStorage (set at candidate login)
-const SESSION_ID   = localStorage.getItem('session_id')   || null
-const CANDIDATE_ID = localStorage.getItem('user_id')      || null
+const SNAPSHOT_INTERVAL_MS = 30000
+const CODE_SYNC_DEBOUNCE_MS = 300
+
+// Map a /submissions/run test result onto the editor's result shape
+const toEditorResult = (r) => ({
+  id:           r.id,
+  input:        r.input,
+  expected:     r.expected,
+  stdout:       r.stdout,
+  passed:       r.passed,
+  statusLabel:  r.status_label,
+  statusType:   r.status_type,
+  statusId:     r.passed ? 3 : 4,
+  error:        r.stderr || r.compile_error || (r.status_type === 'error' ? r.status_label : ''),
+  time:         r.time,
+  memory:       r.memory,
+})
 
 // ─── Difficulty badge colours ─────────────────────────────────────────────────
 const DIFF = {
@@ -25,7 +39,7 @@ const DIFF = {
 }
 
 // ─── Problem-list dropdown ────────────────────────────────────────────────────
-function ProblemNav({ currentIdx, solved, onSelect, onClose }) {
+function ProblemNav({ problems, currentIdx, solved, onSelect, onClose }) {
   return (
     <div className="absolute top-full left-0 mt-1 w-72 bg-white border border-gray-200 rounded-2xl shadow-xl z-50 p-2">
       <div className="flex items-center justify-between px-2 py-1.5 mb-1">
@@ -34,7 +48,7 @@ function ProblemNav({ currentIdx, solved, onSelect, onClose }) {
           <X size={13} />
         </button>
       </div>
-      {PROBLEMS.map((p, i) => (
+      {problems.map((p, i) => (
         <button
           key={p.id}
           onClick={() => { onSelect(i); onClose() }}
@@ -62,7 +76,7 @@ function ProblemNav({ currentIdx, solved, onSelect, onClose }) {
 }
 
 // ─── Left panel: problem statement ───────────────────────────────────────────
-function ProblemPanel({ problem }) {
+function ProblemPanel({ problem, index }) {
   return (
     <div className="h-full overflow-y-auto bg-white">
       <div className="p-6 space-y-5">
@@ -75,7 +89,7 @@ function ProblemPanel({ problem }) {
         </div>
 
         <h1 className="text-2xl font-bold text-gray-900 leading-tight">
-          {problem.id}. {problem.title}
+          {index + 1}. {problem.title}
         </h1>
 
         <p
@@ -120,96 +134,143 @@ function ProblemPanel({ problem }) {
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function CandidateInterviewPage() {
+  const sessionId = candidateSession.sessionId
+  if (!sessionId) return <Navigate to="/candidate/login" replace />
+  return <InterviewWorkspace sessionId={sessionId} />
+}
+
+function InterviewWorkspace({ sessionId }) {
   const navigate = useNavigate()
-  const TOTAL = 60 * 60
-  const [timeLeft, setTimeLeft]     = useState(TOTAL)
+  const [session, setSession]       = useState(null)
+  const [problems, setProblems]     = useState([])
+  const [loadError, setLoadError]   = useState('')
+  const [timeLeft, setTimeLeft]     = useState(null)
   const [currentIdx, setCurrentIdx] = useState(0)
   const [lang, setLang]             = useState('JavaScript')
   // Per-problem, per-language code state
-  const [codes, setCodes] = useState(() =>
-    Object.fromEntries(
-      PROBLEMS.map((p) => [p.id, { ...p.starterCode }])
-    )
-  )
+  const [codes, setCodes]           = useState({})
   const [solved, setSolved]             = useState({})
   const [showNav, setShowNav]           = useState(false)
   const [fullscreen, setFullscreen]     = useState(false)
   const [showSubmitModal, setShowSubmitModal] = useState(false)
+  const [submitting, setSubmitting]     = useState(false)
+  const [submitError, setSubmitError]   = useState('')
   const [showHelp, setShowHelp]         = useState(false)
+  const [interviewerMsgs, setInterviewerMsgs] = useState([])
 
-  const problem = PROBLEMS[currentIdx]
+  const problem = problems[currentIdx]
+  const TOTAL = (session?.duration_minutes || 60) * 60
+  const elapsed = timeLeft == null ? 0 : TOTAL - timeLeft
+
+  // ── Load session + problems ──
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const { data: sess } = await sessionsAPI.get(sessionId)
+        if (sess.status === 'completed' || sess.status === 'cancelled') {
+          navigate('/candidate/submitted', { replace: true })
+          return
+        }
+        const probs = await loadSessionProblems(sess)
+        if (cancelled) return
+        setSession(sess)
+        setProblems(probs)
+        setCodes(Object.fromEntries(probs.map((p) => [p.id, { ...p.starterCode }])))
+      } catch (err) {
+        if (!cancelled) setLoadError(err.response?.data?.detail || 'Could not load your interview.')
+      }
+    })()
+    return () => { cancelled = true }
+  }, [sessionId, navigate])
+
+  // ── Countdown from the server-side start time ──
+  useEffect(() => {
+    if (!session) return
+    const startedAt = session.started_at ? new Date(session.started_at).getTime() : Date.now()
+    const tick = () => {
+      const left = Math.max(0, Math.round(TOTAL - (Date.now() - startedAt) / 1000))
+      setTimeLeft(left)
+    }
+    tick()
+    const t = setInterval(tick, 1000)
+    return () => clearInterval(t)
+  }, [session, TOTAL])
 
   // ── WebSocket connection ──
-  const { connected, lastMessage, send } = useInterviewSocket(SESSION_ID)
+  const { connected, send, subscribe } = useInterviewSocket(sessionId)
 
   // ── WebRTC video streaming ──
-  const { localStream, startVideo, stopVideo, connectionState } = useWebRTC(
-    send,
-    lastMessage,
-    'candidate'
-  )
+  const { localStream, startVideo, stopVideo, connectionState } = useWebRTC({
+    role: 'candidate', send, subscribe, connected,
+  })
   const videoRef = useRef(null)
 
   // ── Proctoring ──
-  const { signals: procSignals } = useProctoring({
-    sessionId: SESSION_ID,
-    elapsedSeconds: TOTAL - timeLeft,
-    ws: null,   // signals go via REST batch; WS used for code sync only
-    enabled: !!SESSION_ID,
+  useProctoring({
+    sessionId,
+    elapsedSeconds: elapsed,
+    ws: null,   // signals go via REST batch (persisted + broadcast by the server)
+    enabled: !!session,
   })
 
+  // ── Messages from the interviewer ──
+  useEffect(() => subscribe((msg) => {
+    if (msg.type === 'chat' && msg.role !== 'candidate') {
+      setInterviewerMsgs((prev) => [...prev.slice(-4), { id: Date.now(), text: msg.text }])
+    }
+    if (msg.type === 'session_ended') {
+      navigate('/candidate/submitted', { replace: true })
+    }
+  }), [subscribe, navigate])
+
+  // Latest values for timers/debounces without re-arming them every render
+  const latest = useRef({})
+  latest.current = { problem, lang, codes, elapsed }
+
   // ── Auto-save snapshot every 30s ──
-  const snapshotTimer = useRef(null)
+  const keystrokes = useRef(0)
   useEffect(() => {
-    if (!SESSION_ID) return
-    snapshotTimer.current = setInterval(async () => {
-      try {
-        await analyticsAPI.saveSnapshot({
-          session_id:      SESSION_ID,
-          problem_id:      problem.id,
-          language:        lang,
-          source_code:     codes[problem.id]?.[lang] || '',
-          elapsed_seconds: TOTAL - timeLeft,
-        })
-      } catch { /* silent */ }
-    }, 30000)
-    return () => clearInterval(snapshotTimer.current)
-  }, [problem.id, lang, timeLeft])
-
-  // ── Send code updates over WebSocket ──
-  const sendCodeUpdate = (problemId, language, code) => {
-    send({ type: 'code_update', problem_id: problemId, language, code })
-  }
-
-  // Countdown
-  useEffect(() => {
-    const t = setInterval(() => setTimeLeft((s) => (s > 0 ? s - 1 : 0)), 1000)
+    if (!session) return
+    const t = setInterval(() => {
+      const { problem: p, lang: l, codes: c, elapsed: e } = latest.current
+      if (!p) return
+      const rate = keystrokes.current / (SNAPSHOT_INTERVAL_MS / 60000)
+      keystrokes.current = 0
+      analyticsAPI.saveSnapshot({
+        session_id:      sessionId,
+        problem_id:      p.id,
+        language:        l,
+        source_code:     c[p.id]?.[l] || '',
+        elapsed_seconds: e,
+        keystroke_rate:  rate,
+      }).catch(() => { /* retried next tick */ })
+    }, SNAPSHOT_INTERVAL_MS)
     return () => clearInterval(t)
-  }, [])
+  }, [session, sessionId])
 
-  // ── Start camera when interview begins ──
-  const cameraStarted = useRef(false)
+  // ── Send code updates over WebSocket (debounced) ──
+  const syncTimer = useRef(null)
+  const sendCodeUpdate = useCallback((problemId, language, code) => {
+    clearTimeout(syncTimer.current)
+    syncTimer.current = setTimeout(() => {
+      send({ type: 'code_update', problem_id: problemId, language, code })
+    }, CODE_SYNC_DEBOUNCE_MS)
+  }, [send])
+
+  // Keep the interviewer on the same problem/language as the candidate
   useEffect(() => {
-    if (!SESSION_ID || cameraStarted.current) {
-      return // Don't start camera without a session or if already started
-    }
-    
-    console.log('Starting camera for session:', SESSION_ID)
-    cameraStarted.current = true
-    
-    startVideo().catch(err => {
-      console.error('Failed to start camera:', err)
-      cameraStarted.current = false
-      // Show error to user (could add a toast notification here)
-    })
-
-    return () => {
-      console.log('Stopping camera on unmount')
-      stopVideo()
-      cameraStarted.current = false
-    }
+    if (!connected || !problem) return
+    sendCodeUpdate(problem.id, lang, codes[problem.id]?.[lang] ?? '')
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [SESSION_ID]) // Only run when SESSION_ID changes
+  }, [connected, problem?.id, lang, sendCodeUpdate])
+
+  // ── Start camera once the session is loaded ──
+  useEffect(() => {
+    if (!session) return undefined
+    startVideo().catch((err) => console.error('Failed to start camera:', err))
+    return () => stopVideo()
+  }, [session, startVideo, stopVideo])
 
   // ── Display local video stream ──
   useEffect(() => {
@@ -217,6 +278,16 @@ export default function CandidateInterviewPage() {
       videoRef.current.srcObject = localStream
     }
   }, [localStream])
+
+  // ── Time's up → submit automatically ──
+  const autoSubmitted = useRef(false)
+  useEffect(() => {
+    if (timeLeft === 0 && session && !autoSubmitted.current) {
+      autoSubmitted.current = true
+      handleFinalSubmit()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeLeft, session])
 
   const fmt = (s) => {
     const m = Math.floor(s / 60).toString().padStart(2, '0')
@@ -231,27 +302,88 @@ export default function CandidateInterviewPage() {
     : 'text-gray-700'
 
   const handleCodeChange = (val) => {
+    keystrokes.current++
     setCodes((prev) => ({
       ...prev,
       [problem.id]: { ...prev[problem.id], [lang]: val },
     }))
-    // Debounced WS code sync
     sendCodeUpdate(problem.id, lang, val)
   }
 
-  const handleLangChange = (l) => {
-    setLang(l)
-    // If the problem has starter code for the new lang, pre-fill only if code
-    // hasn't been edited (still matches the default starter).
-    // We always preserve edits, so we just switch the view.
-  }
+  const handleLangChange = (l) => setLang(l)
+
+  // Runs go through /submissions so they're stored and the interviewer sees results live
+  const runOnServer = useCallback(async ({ code, language }) => {
+    const { data } = await submissionsAPI.run({
+      session_id: sessionId,
+      problem_id: problem.id,
+      language,
+      source_code: code,
+    })
+    if (data.is_accepted) setSolved((prev) => ({ ...prev, [problem.id]: true }))
+    return data.results.map(toEditorResult)
+  }, [sessionId, problem?.id])
 
   const handleMarkSolved = () => setSolved((p) => ({ ...p, [problem.id]: true }))
 
-  const handleFinalSubmit = () => navigate('/candidate/submitted')
+  async function handleFinalSubmit() {
+    setSubmitting(true)
+    setSubmitError('')
+    const { lang: l, codes: c } = latest.current
+    const results = await Promise.allSettled(problems.map((p) => {
+      const code = c[p.id]?.[l]
+      if (!code || code === p.starterCode[l]) return Promise.resolve(null)
+      return submissionsAPI.run({
+        session_id: sessionId, problem_id: p.id, language: l, source_code: code, is_final: true,
+      })
+    }))
+    const summary = problems.map((p, i) => {
+      const r = results[i]
+      const data = r.status === 'fulfilled' ? r.value?.data : null
+      return {
+        title: p.title,
+        difficulty: p.difficulty,
+        passed: data?.passed_cases ?? 0,
+        total: data?.total_cases ?? p.testCases.length,
+        attempted: !!data,
+      }
+    })
+    sessionStorage.setItem('submission_summary', JSON.stringify({
+      title: session?.title, elapsed: latest.current.elapsed, problems: summary,
+    }))
+    send({ type: 'candidate_submitted' })
+    stopVideo()
+    navigate('/candidate/submitted')
+  }
+
+  if (loadError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 p-6">
+        <div className="bg-white border border-red-200 rounded-2xl p-6 max-w-md text-center">
+          <AlertTriangle className="mx-auto text-red-500 mb-3" />
+          <p className="font-semibold text-gray-900 mb-1">Unable to open your interview</p>
+          <p className="text-sm text-gray-500 mb-4">{loadError}</p>
+          <button
+            onClick={() => { candidateSession.clear(); navigate('/candidate/login') }}
+            className="text-sm font-semibold text-blue-600 hover:underline"
+          >
+            Back to candidate login
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  if (!problem || timeLeft == null) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <Loader className="animate-spin text-blue-600" />
+      </div>
+    )
+  }
 
   const solvedCount = Object.keys(solved).length
-  const allSolved   = PROBLEMS.every((p) => solved[p.id])
+  const allSolved   = problems.every((p) => solved[p.id])
 
   // Toolbar slot rendered inside CodeEditorPane's toolbar
   const toolbarSlot = (
@@ -299,6 +431,7 @@ export default function CandidateInterviewPage() {
             </button>
             {showNav && (
               <ProblemNav
+                problems={problems}
                 currentIdx={currentIdx}
                 solved={solved}
                 onSelect={setCurrentIdx}
@@ -316,7 +449,7 @@ export default function CandidateInterviewPage() {
             <ChevronLeft size={15} />
           </button>
           <button
-            disabled={currentIdx === PROBLEMS.length - 1}
+            disabled={currentIdx === problems.length - 1}
             onClick={() => setCurrentIdx((i) => i + 1)}
             className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 disabled:opacity-30 transition-colors"
           >
@@ -325,7 +458,7 @@ export default function CandidateInterviewPage() {
 
           {/* Progress pills */}
           <div className="hidden sm:flex items-center gap-1.5 ml-1">
-            {PROBLEMS.map((p, i) => (
+            {problems.map((p, i) => (
               <button
                 key={p.id}
                 onClick={() => setCurrentIdx(i)}
@@ -362,7 +495,7 @@ export default function CandidateInterviewPage() {
             <HelpCircle size={16} />
           </button>
           {/* WS connectivity indicator */}
-          {SESSION_ID && (
+          {(
             <div className={`flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-full ${connected ? 'text-emerald-600 bg-emerald-50' : 'text-gray-400 bg-gray-100'}`}>
               {connected ? <Wifi size={12} /> : <WifiOff size={12} />}
               {connected ? 'Live' : 'Offline'}
@@ -387,22 +520,23 @@ export default function CandidateInterviewPage() {
       <div className="flex flex-1 overflow-hidden">
         {/* Problem panel */}
         <div className="w-[42%] border-r border-gray-200 flex flex-col overflow-hidden">
-          <ProblemPanel problem={problem} />
+          <ProblemPanel problem={problem} index={currentIdx} />
         </div>
 
         {/* Editor */}
         <div className="flex-1 flex flex-col overflow-hidden">
           <CodeEditorPane
             key={`${problem.id}-${lang}`}
-            code={codes[problem.id][lang]}
+            code={codes[problem.id]?.[lang] ?? ''}
             onCodeChange={handleCodeChange}
             language={lang}
             onLanguageChange={handleLangChange}
             problem={problem}
-            starterCode={problem.starterCode[lang]}
+            starterCode={problem.starterCode[lang] ?? ''}
             readOnly={false}
             showLanguageSwitcher
             toolbarSlot={toolbarSlot}
+            onRunAll={runOnServer}
           />
         </div>
       </div>
@@ -417,7 +551,7 @@ export default function CandidateInterviewPage() {
           <span className="hidden sm:inline text-gray-200">|</span>
           <span className="hidden sm:inline">Auto-saved</span>
           <span className="hidden sm:inline text-gray-200">|</span>
-          <span className="text-emerald-600 font-medium">{solvedCount}/{PROBLEMS.length} solved</span>
+          <span className="text-emerald-600 font-medium">{solvedCount}/{problems.length} solved</span>
         </div>
         <div className="flex items-center gap-4 text-xs text-gray-400">
           <button className="flex items-center gap-1 hover:text-gray-600">
@@ -442,13 +576,13 @@ export default function CandidateInterviewPage() {
             </div>
 
             <div className="space-y-2 mb-5">
-              {PROBLEMS.map((p) => (
+              {problems.map((p, i) => (
                 <div key={p.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
                   <div className="flex items-center gap-2.5">
                     <div className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold ${
                       solved[p.id] ? 'bg-emerald-500 text-white' : 'bg-gray-300 text-gray-600'
                     }`}>
-                      {solved[p.id] ? '✓' : p.id}
+                      {solved[p.id] ? '✓' : i + 1}
                     </div>
                     <span className="text-sm font-medium text-gray-800">{p.title}</span>
                     <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-full ${DIFF[p.difficulty]}`}>
@@ -466,13 +600,18 @@ export default function CandidateInterviewPage() {
               <div className="flex items-start gap-2.5 bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4">
                 <AlertTriangle size={13} className="text-amber-500 flex-shrink-0 mt-0.5" />
                 <p className="text-xs text-amber-700">
-                  <strong>{PROBLEMS.length - solvedCount}</strong> problem(s) unsolved. Your current code for each will still be submitted.
+                  <strong>{problems.length - solvedCount}</strong> problem(s) unsolved. Your current code for each will still be submitted.
                 </p>
               </div>
             )}
 
+            {submitError && (
+              <p className="text-xs text-red-600 mb-3">{submitError}</p>
+            )}
+
             <div className="flex gap-3">
               <button
+                disabled={submitting}
                 onClick={() => setShowSubmitModal(false)}
                 className="flex-1 border border-gray-200 rounded-xl py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
               >
@@ -480,9 +619,10 @@ export default function CandidateInterviewPage() {
               </button>
               <button
                 onClick={handleFinalSubmit}
-                className="flex-1 bg-blue-600 text-white rounded-xl py-2.5 text-sm font-semibold hover:bg-blue-700 transition-colors"
+                disabled={submitting}
+                className="flex-1 bg-blue-600 text-white rounded-xl py-2.5 text-sm font-semibold hover:bg-blue-700 transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
               >
-                Confirm &amp; Submit
+                {submitting ? <><Loader size={13} className="animate-spin" /> Submitting…</> : <>Confirm &amp; Submit</>}
               </button>
             </div>
           </div>
@@ -517,10 +657,31 @@ export default function CandidateInterviewPage() {
         </div>
       )}
 
+      {/* ── Messages from the interviewer ── */}
+      {interviewerMsgs.length > 0 && (
+        <div className="fixed top-16 right-4 w-72 space-y-2 z-50">
+          {interviewerMsgs.map((m) => (
+            <div key={m.id} className="bg-white border border-blue-200 shadow-lg rounded-xl p-3 flex gap-2">
+              <MessageSquare size={14} className="text-blue-600 flex-shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] font-bold text-blue-600 uppercase tracking-wide">Interviewer</p>
+                <p className="text-sm text-gray-700 break-words">{m.text}</p>
+              </div>
+              <button
+                onClick={() => setInterviewerMsgs((prev) => prev.filter((x) => x.id !== m.id))}
+                className="text-gray-400 hover:text-gray-600 self-start"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* ── Camera preview (small pip in corner) ── */}
       {localStream && (
         <div className="fixed bottom-4 right-4 z-50">
-          <div className="relative w-40 h-30 bg-black rounded-xl overflow-hidden shadow-lg border-2 border-gray-300">
+          <div className="relative w-40 h-[120px] bg-black rounded-xl overflow-hidden shadow-lg border-2 border-gray-300">
             <video
               ref={videoRef}
               autoPlay

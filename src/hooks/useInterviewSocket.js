@@ -6,82 +6,88 @@
  *   LiveSession            — receives code_update, signal, chat, snapshot
  *
  * Usage:
- *   const { ws, connected, lastMessage, send } = useInterviewSocket(sessionId)
+ *   const { connected, send, subscribe } = useInterviewSocket(sessionId)
+ *   useEffect(() => subscribe((msg) => { ... }), [subscribe])
+ *
+ * Every message is delivered to every subscriber — unlike a single
+ * `lastMessage` state value, nothing is lost when messages arrive in bursts.
  */
 import { useEffect, useRef, useState, useCallback } from 'react'
+import { getAuthToken } from '../services/api'
 
 const WS_BASE = import.meta.env.VITE_WS_URL || 'ws://localhost:8000'
 const RECONNECT_DELAY_MS = 3000
-const MAX_RECONNECTS = 5
+const MAX_RECONNECTS = 10
+// Server close codes that retrying cannot fix (bad token / not a participant / no session)
+const FATAL_CLOSE_CODES = new Set([4001, 4003, 4004])
 
 export function useInterviewSocket(sessionId) {
-  const wsRef            = useRef(null)
-  const reconnectCount   = useRef(0)
-  const reconnectTimer   = useRef(null)
-  const [connected,    setConnected]    = useState(false)
-  const [lastMessage,  setLastMessage]  = useState(null)
+  const wsRef          = useRef(null)
+  const listenersRef   = useRef(new Set())
+  const [connected, setConnected] = useState(false)
+  const [lastMessage, setLastMessage] = useState(null)
 
-  const connect = useCallback(() => {
-    if (!sessionId) {
-      console.log('[WebSocket] No session ID provided')
-      return
-    }
-    const token = localStorage.getItem('access_token')
-    if (!token) {
-      console.log('[WebSocket] No access token found')
-      return
-    }
+  useEffect(() => {
+    if (!sessionId) return
+    const token = getAuthToken()
+    if (!token) return
 
-    const url = `${WS_BASE}/ws/${sessionId}?token=${token}`
-    console.log('[WebSocket] Connecting to:', url)
-    const ws  = new WebSocket(url)
-    wsRef.current = ws
+    let disposed = false
+    let reconnects = 0
+    let timer = null
 
-    ws.onopen = () => {
-      console.log('[WebSocket] Connected successfully')
-      setConnected(true)
-      reconnectCount.current = 0
-    }
+    const connect = () => {
+      const ws = new WebSocket(`${WS_BASE}/ws/${sessionId}?token=${encodeURIComponent(token)}`)
+      wsRef.current = ws
 
-    ws.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data)
-        console.log('[WebSocket] Received message:', msg.type)
+      ws.onopen = () => {
+        reconnects = 0
+        setConnected(true)
+      }
+
+      ws.onmessage = (event) => {
+        let msg
+        try { msg = JSON.parse(event.data) } catch { return }
         setLastMessage(msg)
-      } catch { /* ignore malformed */ }
-    }
+        listenersRef.current.forEach((fn) => {
+          try { fn(msg) } catch (err) { console.error('[WebSocket] listener error', err) }
+        })
+      }
 
-    ws.onclose = () => {
-      console.log('[WebSocket] Connection closed')
-      setConnected(false)
-      wsRef.current = null
-      if (reconnectCount.current < MAX_RECONNECTS) {
-        reconnectCount.current++
-        console.log(`[WebSocket] Reconnecting... (${reconnectCount.current}/${MAX_RECONNECTS})`)
-        reconnectTimer.current = setTimeout(connect, RECONNECT_DELAY_MS)
+      ws.onclose = (event) => {
+        if (wsRef.current === ws) wsRef.current = null
+        setConnected(false)
+        if (disposed || FATAL_CLOSE_CODES.has(event.code)) return
+        if (reconnects < MAX_RECONNECTS) {
+          reconnects++
+          timer = setTimeout(connect, RECONNECT_DELAY_MS)
+        }
       }
     }
 
-    ws.onerror = (error) => {
-      console.error('[WebSocket] Error:', error)
-      ws.close()
+    connect()
+
+    return () => {
+      disposed = true
+      clearTimeout(timer)
+      wsRef.current?.close()
+      wsRef.current = null
     }
   }, [sessionId])
-
-  useEffect(() => {
-    connect()
-    return () => {
-      clearTimeout(reconnectTimer.current)
-      wsRef.current?.close()
-    }
-  }, [connect])
 
   const send = useCallback((message) => {
     const ws = wsRef.current
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(message))
+      return true
     }
+    return false
   }, [])
 
-  return { ws: wsRef.current, connected, lastMessage, send }
+  const subscribe = useCallback((fn) => {
+    listenersRef.current.add(fn)
+    return () => listenersRef.current.delete(fn)
+  }, [])
+
+  return { connected, lastMessage, send, subscribe }
 }

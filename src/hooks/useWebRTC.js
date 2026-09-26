@@ -1,12 +1,23 @@
 /**
- * useWebRTC - Manages WebRTC peer connection for video streaming
- * 
+ * useWebRTC — one-way camera stream from candidate to interviewer, signaled
+ * over the interview WebSocket.
+ *
+ * Negotiation:
+ *   - The candidate always makes the offer. It (re)offers when its socket
+ *     connects, when an interviewer joins the room, and when an interviewer
+ *     sends `webrtc_request` (sent by the interviewer on connect).
+ *   - Every offer carries an `offer_id`; answers and ICE candidates echo it so
+ *     messages from a superseded negotiation are ignored.
+ *   - Remote ICE candidates are queued until the remote description is set.
+ *
  * Usage:
  *   // Candidate (sender):
- *   const { localStream, startVideo, stopVideo, connectionState } = useWebRTC(send, lastMessage, 'candidate')
- *   
+ *   const { localStream, startVideo, stopVideo, connectionState } =
+ *     useWebRTC({ role: 'candidate', send, subscribe, connected })
+ *
  *   // Interviewer (receiver):
- *   const { remoteStream, connectionState } = useWebRTC(send, lastMessage, 'interviewer')
+ *   const { remoteStream, connectionState } =
+ *     useWebRTC({ role: 'interviewer', send, subscribe, connected })
  */
 import { useState, useEffect, useRef, useCallback } from 'react'
 
@@ -14,186 +25,164 @@ const ICE_SERVERS = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
-  ]
+  ],
 }
 
-export function useWebRTC(sendMessage, lastMessage, role) {
-  const [localStream, setLocalStream] = useState(null)
-  const [remoteStream, setRemoteStream] = useState(null)
-  const [connectionState, setConnectionState] = useState('new') // new, connecting, connected, disconnected, failed
-  const peerConnection = useRef(null)
+const OFFER_DEBOUNCE_MS = 300
+
+export function useWebRTC({ role, send, subscribe, connected }) {
+  const [localStream, setLocalStream]         = useState(null)
+  const [remoteStream, setRemoteStream]       = useState(null)
+  const [connectionState, setConnectionState] = useState('new')
+
+  const pcRef          = useRef(null)
+  const offerIdRef     = useRef(null)
+  const pendingIceRef  = useRef([])
   const localStreamRef = useRef(null)
+  const offerTimerRef  = useRef(null)
 
-  // Keep localStreamRef in sync with localStream state
-  useEffect(() => {
-    localStreamRef.current = localStream
-  }, [localStream])
+  const closePeer = useCallback(() => {
+    if (pcRef.current) {
+      pcRef.current.onicecandidate = null
+      pcRef.current.ontrack = null
+      pcRef.current.onconnectionstatechange = null
+      pcRef.current.close()
+      pcRef.current = null
+    }
+    pendingIceRef.current = []
+  }, [])
 
-  // Initialize peer connection
-  const initializePeerConnection = useCallback(() => {
-    if (peerConnection.current) return peerConnection.current
-
-    console.log(`[${role}] Initializing peer connection`)
+  const createPeer = useCallback((offerId) => {
+    closePeer()
     const pc = new RTCPeerConnection(ICE_SERVERS)
-    peerConnection.current = pc
+    pcRef.current = pc
+    offerIdRef.current = offerId
 
-    // Monitor connection state
-    pc.onconnectionstatechange = () => {
-      setConnectionState(pc.connectionState)
-      console.log(`[${role}] WebRTC connection state:`, pc.connectionState)
-    }
-
-    // Monitor ICE connection state (more detailed)
-    pc.oniceconnectionstatechange = () => {
-      console.log(`[${role}] ICE connection state:`, pc.iceConnectionState)
-    }
-
-    // Monitor ICE gathering state
-    pc.onicegatheringstatechange = () => {
-      console.log(`[${role}] ICE gathering state:`, pc.iceGatheringState)
-    }
-
-    // Handle incoming ICE candidates
+    pc.onconnectionstatechange = () => setConnectionState(pc.connectionState)
     pc.onicecandidate = (event) => {
       if (event.candidate) {
-        console.log(`[${role}] Sending ICE candidate`)
-        sendMessage({
-          type: 'webrtc_ice_candidate',
-          candidate: event.candidate.toJSON()
-        })
-      } else {
-        console.log(`[${role}] ICE gathering complete`)
+        send({ type: 'webrtc_ice_candidate', offer_id: offerId, candidate: event.candidate.toJSON() })
       }
     }
-
-    // Handle incoming remote stream (for interviewer)
     pc.ontrack = (event) => {
-      console.log(`[${role}] Received remote track:`, event.track.kind)
-      setRemoteStream(event.streams[0])
+      setRemoteStream(event.streams[0] || new MediaStream([event.track]))
     }
-
+    setConnectionState('connecting')
     return pc
-  }, [sendMessage, role])
+  }, [closePeer, send])
 
-  // Start local video (candidate only)
+  const flushPendingIce = useCallback(async (pc) => {
+    const queued = pendingIceRef.current
+    pendingIceRef.current = []
+    for (const c of queued) {
+      try { await pc.addIceCandidate(new RTCIceCandidate(c)) } catch { /* stale */ }
+    }
+  }, [])
+
+  // ── Candidate: make a fresh offer (debounced to coalesce triggers) ──
+  const makeOffer = useCallback(() => {
+    clearTimeout(offerTimerRef.current)
+    offerTimerRef.current = setTimeout(async () => {
+      const stream = localStreamRef.current
+      if (!stream) return
+      const offerId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      const pc = createPeer(offerId)
+      stream.getTracks().forEach((track) => pc.addTrack(track, stream))
+      try {
+        const offer = await pc.createOffer()
+        await pc.setLocalDescription(offer)
+        send({ type: 'webrtc_offer', offer_id: offerId, offer: pc.localDescription.toJSON() })
+      } catch (err) {
+        console.error('[webrtc] failed to create offer', err)
+      }
+    }, OFFER_DEBOUNCE_MS)
+  }, [createPeer, send])
+
+  // ── Candidate: acquire camera ──
   const startVideo = useCallback(async () => {
-    try {
-      console.log('[candidate] Requesting camera access...')
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          facingMode: 'user'
-        },
-        audio: false // Audio handled separately or add if needed
-      })
+    if (localStreamRef.current) return localStreamRef.current
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+      audio: false,
+    })
+    localStreamRef.current = stream
+    setLocalStream(stream)
+    return stream
+  }, [])
 
-      console.log('[candidate] Camera access granted, got stream')
-      setLocalStream(stream)
-
-      // Add tracks to peer connection
-      const pc = initializePeerConnection()
-      stream.getTracks().forEach(track => {
-        console.log('[candidate] Adding track to peer connection:', track.kind)
-        pc.addTrack(track, stream)
-      })
-
-      // Create and send offer
-      console.log('[candidate] Creating WebRTC offer...')
-      const offer = await pc.createOffer()
-      await pc.setLocalDescription(offer)
-
-      sendMessage({
-        type: 'webrtc_offer',
-        offer: offer
-      })
-
-      console.log('[candidate] Sent WebRTC offer to interviewer')
-    } catch (error) {
-      console.error('[candidate] Failed to start video:', error)
-      throw error
-    }
-  }, [sendMessage, initializePeerConnection])
-
-  // Stop video
   const stopVideo = useCallback(() => {
-    const stream = localStreamRef.current
-    if (stream) {
-      stream.getTracks().forEach(track => track.stop())
-      setLocalStream(null)
-    }
-    if (peerConnection.current) {
-      peerConnection.current.close()
-      peerConnection.current = null
-    }
+    clearTimeout(offerTimerRef.current)
+    localStreamRef.current?.getTracks().forEach((t) => t.stop())
+    localStreamRef.current = null
+    setLocalStream(null)
+    closePeer()
     setConnectionState('closed')
-  }, []) // No dependencies - uses ref instead
+  }, [closePeer])
 
-  // Handle WebSocket messages
+  // Candidate offers once both the socket and the camera are ready
   useEffect(() => {
-    if (!lastMessage) return
+    if (role === 'candidate' && connected && localStream) makeOffer()
+  }, [role, connected, localStream, makeOffer])
 
-    const handleWebRTCMessage = async () => {
-      console.log(`[${role}] Received message:`, lastMessage.type)
-      const pc = initializePeerConnection()
+  // Interviewer asks any already-present candidate for a fresh offer
+  useEffect(() => {
+    if (role === 'interviewer' && connected) send({ type: 'webrtc_request' })
+  }, [role, connected, send])
+
+  // ── Signaling messages ──
+  useEffect(() => {
+    if (!subscribe) return undefined
+    return subscribe(async (msg) => {
+      // Only react to the other side
+      if (msg.role && msg.role === role) return
 
       try {
-        if (lastMessage.type === 'webrtc_offer' && role === 'interviewer') {
-          // Interviewer receives offer from candidate
-          console.log('[interviewer] Received WebRTC offer from candidate')
-          await pc.setRemoteDescription(new RTCSessionDescription(lastMessage.offer))
-          const answer = await pc.createAnswer()
-          await pc.setLocalDescription(answer)
-
-          sendMessage({
-            type: 'webrtc_answer',
-            answer: answer
-          })
-
-          console.log('[interviewer] Sent WebRTC answer')
-        }
-
-        else if (lastMessage.type === 'webrtc_answer' && role === 'candidate') {
-          // Candidate receives answer from interviewer
-          console.log('[candidate] Received WebRTC answer from interviewer')
-          await pc.setRemoteDescription(new RTCSessionDescription(lastMessage.answer))
-          console.log('[candidate] Set remote description successfully')
-        }
-
-        else if (lastMessage.type === 'webrtc_ice_candidate') {
-          // Both parties receive ICE candidates
-          console.log(`[${role}] Received ICE candidate`)
-          if (lastMessage.candidate) {
-            await pc.addIceCandidate(new RTCIceCandidate(lastMessage.candidate))
-            console.log(`[${role}] Added ICE candidate successfully`)
+        if (role === 'candidate') {
+          if (msg.type === 'webrtc_request' ||
+              (msg.type === 'user_joined' && msg.role === 'interviewer')) {
+            makeOffer()
+          } else if (msg.type === 'webrtc_answer') {
+            const pc = pcRef.current
+            if (!pc || msg.offer_id !== offerIdRef.current || pc.signalingState !== 'have-local-offer') return
+            await pc.setRemoteDescription(new RTCSessionDescription(msg.answer))
+            await flushPendingIce(pc)
+          }
+        } else {
+          if (msg.type === 'webrtc_offer') {
+            const pc = createPeer(msg.offer_id)
+            await pc.setRemoteDescription(new RTCSessionDescription(msg.offer))
+            await flushPendingIce(pc)
+            const answer = await pc.createAnswer()
+            await pc.setLocalDescription(answer)
+            send({ type: 'webrtc_answer', offer_id: msg.offer_id, answer: pc.localDescription.toJSON() })
+          } else if (msg.type === 'user_left' && msg.role === 'candidate') {
+            closePeer()
+            setRemoteStream(null)
+            setConnectionState('disconnected')
           }
         }
-      } catch (error) {
-        console.error(`[${role}] WebRTC signaling error:`, error)
-      }
-    }
 
-    handleWebRTCMessage()
-  }, [lastMessage, role, sendMessage, initializePeerConnection])
+        if (msg.type === 'webrtc_ice_candidate' && msg.candidate) {
+          if (msg.offer_id !== offerIdRef.current) return
+          const pc = pcRef.current
+          if (pc?.remoteDescription) {
+            await pc.addIceCandidate(new RTCIceCandidate(msg.candidate))
+          } else {
+            pendingIceRef.current.push(msg.candidate)
+          }
+        }
+      } catch (err) {
+        console.error(`[webrtc:${role}] signaling error`, err)
+      }
+    })
+  }, [subscribe, role, send, makeOffer, createPeer, closePeer, flushPendingIce])
 
   // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      const stream = localStreamRef.current
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop())
-      }
-      if (peerConnection.current) {
-        peerConnection.current.close()
-      }
-    }
-  }, []) // Run only on unmount
+  useEffect(() => () => {
+    clearTimeout(offerTimerRef.current)
+    localStreamRef.current?.getTracks().forEach((t) => t.stop())
+    closePeer()
+  }, [closePeer])
 
-  return {
-    localStream,
-    remoteStream,
-    connectionState,
-    startVideo,
-    stopVideo,
-  }
+  return { localStream, remoteStream, connectionState, startVideo, stopVideo }
 }

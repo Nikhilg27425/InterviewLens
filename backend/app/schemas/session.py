@@ -57,6 +57,8 @@ class SessionSummary(BaseModel):
     candidate_role: str | None
     duration_minutes: int
     started_at: datetime | None
+    ended_at: datetime | None
+    scheduled_at: datetime | None
     created_at: datetime
     final_score: int | None
 

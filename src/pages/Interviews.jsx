@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { Search, Filter, Clock, CheckCircle, AlertTriangle, Play, Users } from 'lucide-react'
+import NewSessionModal from '../components/NewSessionModal'
 import { sessionsAPI } from '../services/api'
 
 const riskColors = {
@@ -10,6 +11,8 @@ const riskColors = {
 }
 
 export default function Interviews() {
+  const [showNew, setShowNew] = useState(false)
+  const [reloadKey, setReloadKey] = useState(0)
   const [search, setSearch] = useState('')
   const [interviews, setInterviews] = useState([])
   const [loading, setLoading] = useState(true)
@@ -57,7 +60,7 @@ export default function Interviews() {
     }
 
     fetchInterviews()
-  }, [])
+  }, [reloadKey])
 
   const filtered = interviews.filter(
     (i) =>
@@ -72,12 +75,12 @@ export default function Interviews() {
           <h1 className="text-2xl font-bold text-gray-900">Interviews</h1>
           <p className="text-gray-500 text-sm mt-0.5">All technical assessment sessions</p>
         </div>
-        <Link
-          to="/live-session"
-          className="flex items-center gap-2 bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-blue-700"
-        >
+        <button
+            onClick={() => setShowNew(true)}
+            className="flex items-center gap-2 bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-blue-700"
+          >
           <Play size={14} fill="white" /> Start New Session
-        </Link>
+        </button>
       </div>
 
       {/* Search + filter */}
@@ -119,13 +122,13 @@ export default function Interviews() {
                 }
               </p>
               {!search && (
-                <Link
-                  to="/live-session"
-                  className="inline-flex items-center gap-2 bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-blue-700"
-                >
+                <button
+            onClick={() => setShowNew(true)}
+            className="inline-flex items-center gap-2 bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-blue-700"
+          >
                   <Play size={14} fill="white" />
                   Start New Session
-                </Link>
+                </button>
               )}
             </div>
           </div>
@@ -205,6 +208,12 @@ export default function Interviews() {
           </table>
         )}
       </div>
+      {showNew && (
+        <NewSessionModal
+          onClose={() => setShowNew(false)}
+          onCreated={() => setReloadKey((k) => k + 1)}
+        />
+      )}
     </div>
   )
 }

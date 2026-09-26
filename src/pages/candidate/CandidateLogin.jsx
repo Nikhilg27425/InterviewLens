@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Mail, Lock, Eye, EyeOff, Info, ArrowRight, CheckCircle } from 'lucide-react'
 import Logo from '../../components/Logo'
-import { authAPI, sessionsAPI } from '../../services/api'
+import { authAPI, sessionsAPI, candidateSession } from '../../services/api'
 
 const perks = [
   {
@@ -37,15 +37,19 @@ export default function CandidateLogin() {
     }
     setError('')
     setLoading(true)
-    authAPI.loginCandidate(form.email, form.token)
-      .then(({ data }) => {
-        localStorage.setItem('access_token', data.access_token)
-        localStorage.setItem('user_id', data.user_id)
-        localStorage.setItem('user', JSON.stringify({ id: data.user_id, name: data.full_name, role: data.role }))
-        return sessionsAPI.getByToken(form.token)
-      })
-      .then(({ data: sess }) => {
-        localStorage.setItem('session_id', sess.id)
+    const accessToken = form.token.trim().toUpperCase()
+    const email = form.email.trim()
+    Promise.all([
+      authAPI.loginCandidate(email, accessToken),
+      sessionsAPI.getByToken(accessToken),
+    ])
+      .then(([{ data }, { data: sess }]) => {
+        candidateSession.save({
+          token: data.access_token,
+          user: { id: data.user_id, full_name: data.full_name, role: data.role },
+          sessionId: sess.id,
+          accessToken,
+        })
         setLoading(false)
         navigate('/candidate/waiting-room')
       })

@@ -50,3 +50,18 @@ async def require_admin(current_user: User = Depends(get_current_user)) -> User:
     if current_user.role != UserRole.admin:
         raise HTTPException(status_code=403, detail="Admins only")
     return current_user
+
+
+async def get_session_for_user(session_id, db: AsyncSession, user: User):
+    """Load an interview session the user participates in (owner interviewer,
+    assigned candidate, or admin). 404 if missing, 403 otherwise."""
+    from app.models.session import InterviewSession
+
+    sess = (await db.execute(
+        select(InterviewSession).where(InterviewSession.id == session_id)
+    )).scalar_one_or_none()
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if user.role != UserRole.admin and user.id not in (sess.interviewer_id, sess.candidate_id):
+        raise HTTPException(status_code=403, detail="Not your session")
+    return sess

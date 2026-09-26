@@ -273,9 +273,11 @@ export default function CodeEditorPane({
   showLanguageSwitcher = true,
   toolbarSlot  = null,
   onSignal,          // callback(type, detail) for proctoring events
+  onRunAll,          // optional async ({ code, language }) => results; replaces the default runner
 }) {
   const textareaRef  = useRef(null)
   const highlightRef = useRef(null)
+  const gutterRef    = useRef(null)
   const paneRef      = useRef(null)
 
   // ── state ──
@@ -316,6 +318,7 @@ export default function CodeEditorPane({
     if (!highlightRef.current || !textareaRef.current) return
     highlightRef.current.scrollTop  = textareaRef.current.scrollTop
     highlightRef.current.scrollLeft = textareaRef.current.scrollLeft
+    if (gutterRef.current) gutterRef.current.scrollTop = textareaRef.current.scrollTop
   }, [])
 
   // ── keyboard handler ──
@@ -378,19 +381,21 @@ export default function CodeEditorPane({
       }))
     )
     try {
-      const results = await runAllTestCases({ code, language, testCases: problem.testCases })
+      const results = onRunAll
+        ? await onRunAll({ code, language })
+        : await runAllTestCases({ code, language, testCases: problem.testCases })
       setTestResults(results)
     } catch (err) {
       setTestResults(problem.testCases.map((tc, i) => ({
         id: i + 1, input: tc.label ?? tc.stdin, expected: tc.expected,
         running: false, passed: false,
         statusId: 13, statusLabel: 'Network Error', statusType: 'error',
-        error: `Could not reach Judge0 CE: ${err.message}`, stdout: '',
+        error: `Code execution failed: ${err.response?.data?.detail || err.message}`, stdout: '',
       })))
     } finally {
       setRunning(false)
     }
-  }, [code, language, problem])
+  }, [code, language, problem, onRunAll])
 
   // ── Run custom input ──
   const handleRunCustom = useCallback(async () => {
@@ -524,20 +529,13 @@ export default function CodeEditorPane({
 
         {/* Gutter (line numbers) */}
         <div
+          ref={gutterRef}
           className="absolute left-0 top-0 bottom-0 select-none pointer-events-none z-10 overflow-hidden"
           style={{ width: 48, background: '#1e1e1e', borderRight: '1px solid #2d2d2d' }}
           aria-hidden="true"
         >
           <div
             className="text-right pr-3 pt-4 pb-4"
-            ref={(el) => {
-              // sync gutter scroll with textarea
-              if (!el) return
-              if (textareaRef.current) {
-                const handler = () => { el.scrollTop = textareaRef.current.scrollTop }
-                textareaRef.current.addEventListener('scroll', handler)
-              }
-            }}
             style={{ fontFamily: 'inherit', fontSize, lineHeight: `${lineH}px`, color: '#495162' }}
           >
             {Array.from({ length: lineCount }, (_, i) => (

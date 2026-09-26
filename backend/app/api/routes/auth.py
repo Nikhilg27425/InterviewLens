@@ -129,6 +129,9 @@ async def login_candidate(body: CandidateLogin, db: AsyncSession = Depends(get_d
             detail="This session is already assigned to another candidate."
         )
 
+    if session.status == SessionStatus.scheduled:
+        session.status = SessionStatus.waiting
+
     await db.commit()
 
     token = create_access_token(str(user.id), extra={"role": user.role, "session_id": str(session.id)})
@@ -153,7 +156,8 @@ async def me(current_user: User = Depends(get_current_user)):
 async def google_login():
     """Initiate Google OAuth flow"""
     if not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_CLIENT_SECRET:
-        raise HTTPException(status_code=501, detail="Google OAuth not configured")
+        error = urlencode({"error": "Google sign-in is not configured on this server"})
+        return RedirectResponse(url=f"{settings.FRONTEND_URL}/login?{error}")
     
     # Build Google OAuth authorization URL
     params = {
@@ -174,7 +178,8 @@ async def google_login():
 async def github_login():
     """Initiate GitHub OAuth flow"""
     if not settings.GITHUB_CLIENT_ID or not settings.GITHUB_CLIENT_SECRET:
-        raise HTTPException(status_code=501, detail="GitHub OAuth not configured")
+        error = urlencode({"error": "GitHub sign-in is not configured on this server"})
+        return RedirectResponse(url=f"{settings.FRONTEND_URL}/login?{error}")
     
     # Build GitHub OAuth authorization URL
     params = {
@@ -324,12 +329,16 @@ async def oauth_callback(
         token = create_access_token(str(user.id), extra={"role": user.role})
         
         # Redirect back to frontend with token
-        frontend_url = f"http://localhost:5173/auth/callback?token={token}&user_id={user.id}&full_name={user.full_name}&role={user.role}"
-        return RedirectResponse(url=frontend_url)
+        params = urlencode({
+            "token": token,
+            "user_id": str(user.id),
+            "full_name": user.full_name,
+            "role": user.role.value,
+        })
+        return RedirectResponse(url=f"{settings.FRONTEND_URL}/auth/callback?{params}")
         
-    except HTTPException:
-        raise
+    except HTTPException as e:
+        return RedirectResponse(url=f"{settings.FRONTEND_URL}/login?{urlencode({'error': e.detail})}")
     except Exception as e:
         # Redirect to frontend with error
-        error_url = f"http://localhost:5173/login?error={str(e)}"
-        return RedirectResponse(url=error_url)
+        return RedirectResponse(url=f"{settings.FRONTEND_URL}/login?{urlencode({'error': str(e)})}")

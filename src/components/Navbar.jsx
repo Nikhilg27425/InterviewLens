@@ -6,7 +6,9 @@ import { useAuth } from '../contexts/AuthContext'
 
 export default function Navbar() {
   const navigate = useNavigate()
-  const { logout } = useAuth()
+  const { logout, user } = useAuth()
+  const initials = (user?.full_name || user?.email || '?')
+    .split(/[\s@]/).filter(Boolean).map((w) => w[0]).join('').slice(0, 2).toUpperCase()
   const [dropdownOpen, setDropdownOpen] = useState(false)
 
   const handleSignOut = () => {
@@ -54,19 +56,27 @@ export default function Navbar() {
             className="flex items-center gap-1"
             onClick={() => setDropdownOpen(!dropdownOpen)}
           >
-            <div className="w-8 h-8 rounded-full bg-gray-800 flex items-center justify-center text-white text-xs font-semibold">
-              SJ
+            <div
+              title={user?.full_name || ''}
+              className="w-8 h-8 rounded-full bg-gray-800 flex items-center justify-center text-white text-xs font-semibold"
+            >
+              {initials}
             </div>
             <ChevronDown size={14} className="text-gray-500" />
           </button>
           {dropdownOpen && (
             <div className="absolute right-0 mt-1 w-44 bg-white border border-gray-200 rounded-xl shadow-lg py-1 z-50">
-              <button className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
-                Profile
-              </button>
-              <button className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
+              <div className="px-4 py-2">
+                <p className="text-sm font-semibold text-gray-900 truncate">{user?.full_name}</p>
+                {user?.email && <p className="text-xs text-gray-400 truncate">{user.email}</p>}
+              </div>
+              <Link
+                to="/settings"
+                onClick={() => setDropdownOpen(false)}
+                className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+              >
                 Settings
-              </button>
+              </Link>
               <hr className="my-1 border-gray-100" />
               <button
                 className="w-full text-left px-4 py-2 text-sm text-red-500 hover:bg-gray-50"

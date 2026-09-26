@@ -1,126 +1,24 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Users, TrendingUp, CheckCircle, AlertTriangle,
-  Calendar, Play, ArrowUpRight, ArrowDownRight,
-  Clock, MoreHorizontal, Filter, RotateCcw, Activity,
+  Play, Clock, ShieldAlert, ChevronRight,
 } from 'lucide-react'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
-import { sessionsAPI, signalsAPI } from '../services/api'
+import NewSessionModal from '../components/NewSessionModal'
+import { analyticsAPI, sessionsAPI } from '../services/api'
 
-const weeklyData = [
-  { day: 'Mon', interviews: 8, quality: 7 },
-  { day: 'Tue', interviews: 12, quality: 7.5 },
-  { day: 'Wed', interviews: 14, quality: 8 },
-  { day: 'Thu', interviews: 22, quality: 8.2 },
-  { day: 'Fri', interviews: 18, quality: 7.8 },
-  { day: 'Sat', interviews: 10, quality: 7.2 },
-  { day: 'Sun', interviews: 7, quality: 6.8 },
-]
+const STATUS_LABEL = {
+  active: 'Live', waiting: 'Waiting', scheduled: 'Scheduled', completed: 'Completed', cancelled: 'Cancelled',
+}
+const TABS = ['All', 'Live', 'Risk Alerts']
 
-const statCards = (stats) => [
-  {
-    label: 'TOTAL INTERVIEWS',
-    value: stats.totalInterviews.toString(),
-    delta: '+12%',
-    up: true,
-    icon: Users,
-    color: 'blue',
-  },
-  {
-    label: 'AVG. SCORE',
-    value: stats.avgScore > 0 ? `${stats.avgScore}/10` : '—',
-    delta: '+2.4%',
-    up: true,
-    icon: TrendingUp,
-    color: 'green',
-  },
-  {
-    label: 'COMPLETED TODAY',
-    value: stats.completedToday.toString(),
-    delta: '-3%',
-    up: false,
-    icon: CheckCircle,
-    color: 'orange',
-  },
-  {
-    label: 'RISK SIGNALS',
-    value: stats.riskSignals.toString(),
-    delta: '-50%',
-    up: true,
-    icon: AlertTriangle,
-    color: 'red',
-  },
-]
+const initialsOf = (name) =>
+  (name || 'UN').split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase()
 
-const sessions = [
-  {
-    name: 'Alex Rivera',
-    role: 'Senior Fullstack Engineer',
-    time: '10:30 AM',
-    status: 'Live',
-    risk: 'Clean session',
-    riskLevel: 'clean',
-    avatar: 'AR',
-    id: '1',
-  },
-  {
-    name: 'Jordan Smith',
-    role: 'Backend Developer (Node.js)',
-    time: '11:15 AM',
-    status: 'Live',
-    risk: 'Suspicious Activity',
-    riskLevel: 'suspicious',
-    avatar: 'JS',
-    id: '2',
-  },
-  {
-    name: 'Taylor Kim',
-    role: 'Frontend Lead',
-    time: '1:00 PM',
-    status: 'Waiting',
-    risk: 'Pre-check completed',
-    riskLevel: 'clean',
-    avatar: 'TK',
-    id: '3',
-  },
-]
-
-const recentActivity = [
-  {
-    dot: 'blue',
-    title: 'Score finalized',
-    desc: 'Sarah Jenkins scored Alex Rivera as 8.5/10',
-    time: '2m ago',
-  },
-  {
-    dot: 'blue',
-    title: 'Risk Signal Detected',
-    desc: 'InterviewLens AI flagged Suspicious Activity in Jordan Smith\'s session',
-    time: '15m ago',
-  },
-  {
-    dot: 'blue',
-    title: 'New Session Started',
-    desc: 'Taylor Kim joined the waiting room',
-    time: '45m ago',
-  },
-  {
-    dot: 'blue',
-    title: 'Interview Scheduled',
-    desc: 'HR Team set up a panel for Jamie Vance',
-    time: '2h ago',
-  },
-]
-
-const similarityScans = [
-  { name: 'Code Comparison v2.4', date: 'Oct 12, 2023', score: '94%', label: 'Safe', safe: true },
-  { name: 'External Repository Scan', date: 'Oct 11, 2023', score: '12%', label: 'Warning', safe: false },
-]
-
-function StatCard({ label, value, delta, up, icon: Icon, color }) {
+function StatCard({ label, value, hint, icon: Icon, color }) {
   const colorMap = {
     blue: 'text-blue-600 bg-blue-50',
     green: 'text-emerald-600 bg-emerald-50',
@@ -133,10 +31,7 @@ function StatCard({ label, value, delta, up, icon: Icon, color }) {
         <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${colorMap[color]}`}>
           <Icon size={17} />
         </div>
-        <span className={`text-xs font-semibold flex items-center gap-0.5 ${up ? 'text-emerald-600' : 'text-red-500'}`}>
-          {up ? <ArrowUpRight size={13} /> : <ArrowDownRight size={13} />}
-          {delta}
-        </span>
+        {hint && <span className="text-xs text-gray-400">{hint}</span>}
       </div>
       <div>
         <p className="text-2xl font-extrabold text-gray-900">{value}</p>
@@ -147,75 +42,57 @@ function StatCard({ label, value, delta, up, icon: Icon, color }) {
 }
 
 export default function Dashboard() {
+  const [showNew, setShowNew] = useState(false)
+  const [reloadKey, setReloadKey] = useState(0)
   const [activeTab, setActiveTab] = useState('All')
-  const [liveSessions, setLiveSessions] = useState([])
+  const [sessions, setSessions] = useState([])
+  const [overview, setOverview] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [stats, setStats] = useState({
-    totalInterviews: 0,
-    completedToday: 0,
-    avgScore: 0,
-    riskSignals: 0
-  })
+  const [error, setError] = useState('')
 
-  // Load real sessions from backend
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const { data: sessions } = await sessionsAPI.list()
-        
-        // Transform sessions for display
-        const transformedSessions = sessions.map(s => ({
-          id: s.id,
-          name: s.candidate_name || 'Unknown Candidate',
-          role: s.candidate_role || 'Candidate',
-          time: s.started_at 
-            ? new Date(s.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-            : s.scheduled_at
-              ? new Date(s.scheduled_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-              : '—',
-          status: s.status === 'active' 
-            ? 'Live' 
-            : s.status === 'waiting' 
-              ? 'Waiting' 
-              : s.status === 'scheduled'
-                ? 'Scheduled'
-                : 'Completed',
-          risk: 'Clean session', // TODO: Calculate from signals
-          riskLevel: 'clean',
-          avatar: (s.candidate_name || 'UN')
-            .split(' ')
-            .map(w => w[0])
-            .join('')
-            .slice(0, 2)
-            .toUpperCase(),
-        }))
-        
-        setLiveSessions(transformedSessions)
-        
-        // Calculate stats
-        const completed = sessions.filter(s => s.status === 'completed').length
-        const today = new Date().toDateString()
-        const completedToday = sessions.filter(s => 
-          s.ended_at && new Date(s.ended_at).toDateString() === today
-        ).length
-        
-        setStats({
-          totalInterviews: sessions.length,
-          completedToday: completedToday,
-          avgScore: 0, // TODO: Calculate from submissions
-          riskSignals: 0 // TODO: Calculate from signals
-        })
-        
-        setLoading(false)
-      } catch (error) {
-        console.error('Failed to fetch sessions:', error)
-        // Keep loading state false to show empty state
-        setLoading(false)
-      }
-    }
+    setError('')
+    Promise.all([sessionsAPI.list(), analyticsAPI.overview()])
+      .then(([{ data: list }, { data: ov }]) => {
+        setSessions(list)
+        setOverview(ov)
+      })
+      .catch(() => setError('Could not load your sessions. Is the backend running?'))
+      .finally(() => setLoading(false))
+  }, [reloadKey])
 
-    fetchData()
-  }, [])
+  const riskFor = (id) => overview?.per_session?.[id] || { high: 0, medium: 0, low: 0 }
+
+  const rows = sessions
+    .filter((s) => activeTab !== 'Live' || s.status === 'active' || s.status === 'waiting')
+    .filter((s) => activeTab !== 'Risk Alerts' || riskFor(s.id).high > 0)
+
+  // Interviews created per day over the last 7 days
+  const weekly = useMemo(() => Array.from({ length: 7 }, (_, i) => {
+    const day = new Date()
+    day.setHours(0, 0, 0, 0)
+    day.setDate(day.getDate() - (6 - i))
+    const same = sessions.filter((s) => new Date(s.created_at).toDateString() === day.toDateString())
+    return {
+      day: day.toLocaleDateString('en-US', { weekday: 'short' }),
+      interviews: same.length,
+      completed: same.filter((s) => s.status === 'completed').length,
+    }
+  }), [sessions])
+
+  const today = new Date().toDateString()
+  const completedToday = sessions.filter((s) => s.ended_at && new Date(s.ended_at).toDateString() === today).length
+  const counts = (status) => sessions.filter((s) => s.status === status).length
+  const needsReview = sessions.filter((s) => riskFor(s.id).high > 0).slice(0, 4)
+  const lastEvent = (s) => new Date(s.ended_at || s.started_at || s.created_at)
+  const recent = [...sessions].sort((a, b) => lastEvent(b) - lastEvent(a)).slice(0, 5)
+
+  const stats = [
+    { label: 'TOTAL INTERVIEWS', value: sessions.length, icon: Users, color: 'blue', hint: `${counts('completed')} completed` },
+    { label: 'AVG. SCORE', value: overview?.avg_score != null ? `${overview.avg_score}/100` : '—', icon: TrendingUp, color: 'green', hint: overview?.pass_rate != null ? `${overview.pass_rate}% pass` : null },
+    { label: 'COMPLETED TODAY', value: completedToday, icon: CheckCircle, color: 'orange' },
+    { label: 'HIGH-RISK SIGNALS', value: overview?.high_risk_signals ?? 0, icon: AlertTriangle, color: 'red', hint: overview ? `${overview.flagged_sessions} sessions` : null },
+  ]
 
   return (
     <div className="p-6 space-y-6">
@@ -225,109 +102,94 @@ export default function Dashboard() {
           <h1 className="text-2xl font-bold text-gray-900">Interviewer Dashboard</h1>
           <p className="text-gray-500 text-sm mt-0.5">Monitor live technical assessments and analyze candidate performance.</p>
         </div>
-        <div className="flex items-center gap-3">
-          <button className="flex items-center gap-2 border border-gray-200 rounded-lg px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors">
-            <Calendar size={15} />
-            Schedule
-          </button>
-          <Link
-            to="/live-session"
-            className="flex items-center gap-2 bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-blue-700 transition-colors"
-          >
-            <Play size={14} fill="white" />
-            Start Live Session
-          </Link>
-        </div>
+        <button
+          onClick={() => setShowNew(true)}
+          className="flex items-center gap-2 bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-blue-700 transition-colors"
+        >
+          <Play size={14} fill="white" />
+          Start Live Session
+        </button>
       </div>
+
+      {error && (
+        <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-600">
+          <AlertTriangle size={15} /> {error}
+        </div>
+      )}
 
       {/* Stat Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {statCards(stats).map((card) => (
-          <StatCard key={card.label} {...card} />
-        ))}
+        {stats.map((card) => <StatCard key={card.label} {...card} />)}
       </div>
 
-      {/* Charts + Recent Activity */}
+      {/* Chart + Recent Activity */}
       <div className="grid lg:grid-cols-3 gap-5">
-        {/* Weekly Performance Chart */}
         <div className="lg:col-span-2 bg-white rounded-2xl border border-gray-100 p-5">
-          <div className="flex items-center justify-between mb-1">
-            <div>
-              <h2 className="font-semibold text-gray-900">Weekly Performance</h2>
-              <p className="text-xs text-gray-400 mt-0.5">Average candidate quality vs. interview volume</p>
-            </div>
-            <div className="flex gap-2">
-              {['Interviews', 'Quality'].map((tab) => (
-                <button key={tab} className={`px-3 py-1 rounded-full text-xs font-semibold transition-colors ${tab === 'Interviews' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
-                  {tab}
-                </button>
-              ))}
-            </div>
+          <div>
+            <h2 className="font-semibold text-gray-900">This Week</h2>
+            <p className="text-xs text-gray-400 mt-0.5">Interviews created vs. completed, last 7 days</p>
           </div>
           <div className="h-56 mt-4">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={weeklyData} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
+              <AreaChart data={weekly} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorInterviews" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#2563EB" stopOpacity={0.2} />
                     <stop offset="95%" stopColor="#2563EB" stopOpacity={0} />
                   </linearGradient>
-                  <linearGradient id="colorQuality" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#6366F1" stopOpacity={0.15} />
-                    <stop offset="95%" stopColor="#6366F1" stopOpacity={0} />
+                  <linearGradient id="colorCompleted" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#10B981" stopOpacity={0.15} />
+                    <stop offset="95%" stopColor="#10B981" stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
                 <XAxis dataKey="day" tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
-                <Tooltip
-                  contentStyle={{ borderRadius: 10, border: '1px solid #e5e7eb', fontSize: 12 }}
-                  cursor={{ stroke: '#e5e7eb' }}
-                />
-                <Area type="monotone" dataKey="interviews" stroke="#2563EB" strokeWidth={2.5} fill="url(#colorInterviews)" dot={false} />
-                <Area type="monotone" dataKey="quality" stroke="#6366F1" strokeWidth={2} fill="url(#colorQuality)" dot={false} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
+                <Tooltip contentStyle={{ borderRadius: 10, border: '1px solid #e5e7eb', fontSize: 12 }} cursor={{ stroke: '#e5e7eb' }} />
+                <Area type="monotone" dataKey="interviews" name="Created" stroke="#2563EB" strokeWidth={2.5} fill="url(#colorInterviews)" dot={false} />
+                <Area type="monotone" dataKey="completed" name="Completed" stroke="#10B981" strokeWidth={2} fill="url(#colorCompleted)" dot={false} />
               </AreaChart>
             </ResponsiveContainer>
           </div>
         </div>
 
-        {/* Recent Activity */}
         <div className="bg-white rounded-2xl border border-gray-100 p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="font-semibold text-gray-900">Recent Activity</h2>
-            <RotateCcw size={15} className="text-gray-400 cursor-pointer hover:text-gray-600" />
-          </div>
-          <div className="space-y-4">
-            {recentActivity.map(({ title, desc, time }, i) => (
-              <div key={i} className="flex gap-3">
-                <div className="mt-1 flex-shrink-0">
-                  <div className="w-2 h-2 bg-blue-600 rounded-full" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-semibold text-gray-800">{title}</p>
-                    <span className="text-xs text-gray-400 flex-shrink-0 ml-2">{time}</span>
-                  </div>
-                  <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">{desc}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-          <button className="mt-5 text-blue-600 text-sm font-semibold hover:underline">
-            View Audit Logs
-          </button>
+          <h2 className="font-semibold text-gray-900 mb-4">Recent Activity</h2>
+          {recent.length === 0 ? (
+            <p className="text-sm text-gray-400">Nothing yet.</p>
+          ) : (
+            <div className="space-y-4">
+              {recent.map((s) => {
+                const what = s.ended_at ? 'Interview completed' : s.started_at ? 'Interview started' : 'Interview created'
+                return (
+                  <Link key={s.id} to={`/interviews/${s.id}`} className="flex gap-3 group">
+                    <div className="mt-1.5 w-2 h-2 bg-blue-600 rounded-full flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-semibold text-gray-800 group-hover:text-blue-600">{what}</p>
+                        <span className="text-xs text-gray-400 flex-shrink-0 ml-2">
+                          {lastEvent(s).toLocaleDateString([], { month: 'short', day: 'numeric' })}
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-0.5 truncate">{s.candidate_name || 'Candidate'} · {s.title}</p>
+                    </div>
+                  </Link>
+                )
+              })}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Active Sessions */}
+      {/* Sessions table */}
       <div className="bg-white rounded-2xl border border-gray-100 p-5">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h2 className="font-semibold text-gray-900">Active Sessions</h2>
-            <p className="text-xs text-gray-400 mt-0.5">Real-time monitoring of current interviews</p>
+            <h2 className="font-semibold text-gray-900">Sessions</h2>
+            <p className="text-xs text-gray-400 mt-0.5">Live monitoring and recent interviews</p>
           </div>
           <div className="flex items-center gap-2">
-            {['All', 'Live', 'Risk Alerts'].map((tab) => (
+            {TABS.map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -336,37 +198,31 @@ export default function Dashboard() {
                 {tab}
               </button>
             ))}
-            <button className="flex items-center gap-1.5 border border-gray-200 rounded-lg px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50">
-              <Filter size={12} />
-              Filter
-            </button>
           </div>
         </div>
 
         <div className="overflow-x-auto">
           {loading ? (
             <div className="flex items-center justify-center py-12">
-              <div className="text-center">
-                <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-                <p className="text-gray-500">Loading sessions...</p>
-              </div>
+              <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
             </div>
-          ) : liveSessions.length === 0 ? (
-            <div className="flex items-center justify-center py-12">
-              <div className="text-center">
-                <Users size={48} className="text-gray-300 mx-auto mb-4" />
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">No sessions yet</h3>
-                <p className="text-gray-500 text-sm mb-4">
-                  Create your first interview session to get started
-                </p>
-                <Link
-                  to="/live-session"
-                  className="inline-flex items-center gap-2 bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-blue-700"
-                >
-                  <Play size={14} fill="white" />
-                  Create Session
-                </Link>
-              </div>
+          ) : rows.length === 0 ? (
+            <div className="text-center py-12">
+              <Users size={48} className="text-gray-300 mx-auto mb-4" />
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                {sessions.length ? 'No sessions match this filter' : 'No sessions yet'}
+              </h3>
+              {!sessions.length && (
+                <>
+                  <p className="text-gray-500 text-sm mb-4">Create your first interview session to get started</p>
+                  <button
+                    onClick={() => setShowNew(true)}
+                    className="inline-flex items-center gap-2 bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-blue-700"
+                  >
+                    <Play size={14} fill="white" /> Create Session
+                  </button>
+                </>
+              )}
             </div>
           ) : (
             <table className="w-full">
@@ -378,164 +234,129 @@ export default function Dashboard() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {liveSessions.map((s) => (
-                  <tr key={s.id} className="hover:bg-gray-50/50 transition-colors">
-                    <td className="py-4 pr-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
-                          {s.avatar}
+                {rows.map((s) => {
+                  const status = STATUS_LABEL[s.status] || s.status
+                  const risk = riskFor(s.id)
+                  const at = s.started_at || s.scheduled_at
+                  return (
+                    <tr key={s.id} className="hover:bg-gray-50/50 transition-colors">
+                      <td className="py-4 pr-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+                            {initialsOf(s.candidate_name)}
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold text-gray-900">{s.candidate_name || 'Unknown Candidate'}</p>
+                            <p className="text-xs text-gray-400">{s.candidate_role || s.title}</p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="text-sm font-semibold text-gray-900">{s.name}</p>
-                          <p className="text-xs text-gray-400">{s.role}</p>
+                      </td>
+                      <td className="py-4 pr-4">
+                        <div className="flex items-center gap-1.5 text-sm text-gray-600">
+                          <Clock size={13} className="text-gray-400" />
+                          {at ? new Date(at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
                         </div>
-                      </div>
-                    </td>
-                    <td className="py-4 pr-4">
-                      <div className="flex items-center gap-1.5 text-sm text-gray-600">
-                        <Clock size={13} className="text-gray-400" />
-                        {s.time}
-                      </div>
-                    </td>
-                    <td className="py-4 pr-4">
-                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${
-                        s.status === 'Live' 
-                          ? 'bg-green-100 text-green-700' 
-                          : s.status === 'Waiting'
-                            ? 'bg-yellow-100 text-yellow-700'
-                            : s.status === 'Scheduled'
-                              ? 'bg-blue-100 text-blue-700'
-                              : 'bg-gray-100 text-gray-500'
-                      }`}>
-                        {s.status === 'Live' && <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />}
-                        {s.status}
-                      </span>
-                    </td>
-                    <td className="py-4 pr-4">
-                      <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${s.riskLevel === 'suspicious' ? 'text-orange-500' : 'text-emerald-600'}`}>
-                        {s.riskLevel === 'suspicious' ? <AlertTriangle size={13} /> : <CheckCircle size={13} />}
-                        {s.risk}
-                      </span>
-                    </td>
-                    <td className="py-4">
-                      <div className="flex items-center gap-2">
-                        <Link
-                          to={`/interviews/${s.id}`}
-                          className="text-xs font-semibold text-gray-700 hover:text-blue-600 transition-colors"
-                        >
-                          View Detail
-                        </Link>
-                        {s.status === 'Live' && (
-                          <Link
-                            to={`/live-session?session=${s.id}`}
-                            className="bg-blue-600 text-white text-xs font-semibold px-3 py-1.5 rounded-lg hover:bg-blue-700 transition-colors"
-                          >
-                            Join Session
+                      </td>
+                      <td className="py-4 pr-4">
+                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${
+                          status === 'Live' ? 'bg-green-100 text-green-700'
+                            : status === 'Waiting' ? 'bg-yellow-100 text-yellow-700'
+                            : status === 'Scheduled' ? 'bg-blue-100 text-blue-700'
+                            : 'bg-gray-100 text-gray-500'
+                        }`}>
+                          {status === 'Live' && <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />}
+                          {status}
+                        </span>
+                      </td>
+                      <td className="py-4 pr-4">
+                        <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${
+                          risk.high ? 'text-red-500' : risk.medium ? 'text-orange-500' : 'text-emerald-600'
+                        }`}>
+                          {risk.high || risk.medium ? <AlertTriangle size={13} /> : <CheckCircle size={13} />}
+                          {risk.high ? `${risk.high} high-risk signal${risk.high > 1 ? 's' : ''}`
+                            : risk.medium ? `${risk.medium} medium-risk signal${risk.medium > 1 ? 's' : ''}`
+                            : 'Clean session'}
+                        </span>
+                      </td>
+                      <td className="py-4">
+                        <div className="flex items-center gap-2">
+                          <Link to={`/interviews/${s.id}`} className="text-xs font-semibold text-gray-700 hover:text-blue-600 transition-colors">
+                            View Detail
                           </Link>
-                        )}
-                        <button className="text-gray-400 hover:text-gray-600 p-1">
-                          <MoreHorizontal size={15} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                          {!['completed', 'cancelled'].includes(s.status) && (
+                            <Link
+                              to={`/live-session?session=${s.id}`}
+                              className="bg-blue-600 text-white text-xs font-semibold px-3 py-1.5 rounded-lg hover:bg-blue-700 transition-colors"
+                            >
+                              {s.status === 'active' ? 'Join Session' : 'Open'}
+                            </Link>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           )}
         </div>
-
-        {!loading && liveSessions.length > 0 && (
-          <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-100">
-            <p className="text-xs text-gray-400">Showing {liveSessions.length} of {liveSessions.length} interview sessions</p>
-            <div className="flex gap-2">
-              <button disabled className="px-3 py-1.5 border border-gray-200 rounded-lg text-xs font-medium text-gray-400 cursor-not-allowed">Previous</button>
-              <button disabled className="px-3 py-1.5 border border-gray-200 rounded-lg text-xs font-medium text-gray-400 cursor-not-allowed">Next</button>
-            </div>
-          </div>
-        )}
       </div>
 
-      {/* Similarity Analysis + Quick Insights */}
+      {/* Needs review + pipeline */}
       <div className="grid lg:grid-cols-2 gap-5">
-        {/* Similarity Analysis */}
         <div className="bg-white rounded-2xl border border-gray-100 p-5">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h2 className="font-semibold text-gray-900">Similarity Analysis</h2>
-              <p className="text-xs text-gray-400 mt-0.5">Automated plagiarism and AI detection scans</p>
-            </div>
-            <ArrowUpRight size={16} className="text-gray-400" />
+          <div className="mb-4">
+            <h2 className="font-semibold text-gray-900">Needs Review</h2>
+            <p className="text-xs text-gray-400 mt-0.5">Sessions with high-risk proctoring signals</p>
           </div>
-          <div className="space-y-3">
-            {similarityScans.map(({ name, date, score, label, safe }) => (
-              <div key={name} className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
-                <div className="w-9 h-9 bg-blue-50 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <span className="text-blue-600 text-base">📄</span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-gray-800">{name}</p>
-                  <p className="text-xs text-gray-400">{date}</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-sm font-bold text-gray-800">{score}</p>
-                  <p className="text-xs text-gray-400">Match Score</p>
-                </div>
-                <span className={`px-2 py-1 rounded-md text-xs font-bold ${safe ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
-                  {label}
-                </span>
+          {needsReview.length === 0 ? (
+            <p className="text-sm text-gray-400">No flagged sessions.</p>
+          ) : (
+            <div className="space-y-3">
+              {needsReview.map((s) => (
+                <Link key={s.id} to={`/interviews/${s.id}`} className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl hover:bg-gray-100">
+                  <ShieldAlert size={18} className="text-red-500 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-gray-800 truncate">{s.candidate_name || 'Candidate'}</p>
+                    <p className="text-xs text-gray-400 truncate">{s.title}</p>
+                  </div>
+                  <span className="px-2 py-1 rounded-md text-xs font-bold bg-red-100 text-red-600">
+                    {riskFor(s.id).high} high
+                  </span>
+                  <ChevronRight size={14} className="text-gray-300" />
+                </Link>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="bg-white rounded-2xl border border-gray-100 p-5">
+          <div className="mb-4">
+            <h2 className="font-semibold text-gray-900">Pipeline</h2>
+            <p className="text-xs text-gray-400 mt-0.5">Where your interviews stand right now</p>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            {[
+              ['Live now', counts('active')],
+              ['Candidates waiting', counts('waiting')],
+              ['Scheduled', counts('scheduled')],
+              ['Completed', counts('completed')],
+            ].map(([label, value]) => (
+              <div key={label} className="bg-gray-50 rounded-xl p-4">
+                <p className="text-xs text-gray-400 font-medium mb-1">{label}</p>
+                <p className="text-xl font-extrabold text-gray-900">{value}</p>
               </div>
             ))}
           </div>
-          <Link
-            to="/code-analysis"
-            className="mt-4 w-full flex items-center justify-center py-2.5 border-2 border-dashed border-gray-200 rounded-xl text-sm font-medium text-gray-500 hover:border-blue-300 hover:text-blue-600 transition-colors"
-          >
-            Run New Similarity Scan
-          </Link>
-        </div>
-
-        {/* Quick Insights */}
-        <div className="bg-white rounded-2xl border border-gray-100 p-5">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h2 className="font-semibold text-gray-900">Quick Insights</h2>
-              <p className="text-xs text-gray-400 mt-0.5">Platform performance and system health</p>
-            </div>
-            <Activity size={16} className="text-green-500" />
-          </div>
-          <div className="space-y-4">
-            <div>
-              <div className="flex justify-between text-xs mb-1.5">
-                <span className="text-gray-500 font-medium">SYSTEM UPTIME</span>
-                <span className="font-bold text-gray-900">99.9%</span>
-              </div>
-              <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                <div className="h-full bg-green-500 rounded-full" style={{ width: '99.9%' }} />
-              </div>
-            </div>
-            <div>
-              <div className="flex justify-between text-xs mb-1.5">
-                <span className="text-gray-500 font-medium">API RESPONSE TIME</span>
-                <span className="font-bold text-gray-900">42MS</span>
-              </div>
-              <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                <div className="h-full bg-blue-500 rounded-full" style={{ width: '30%' }} />
-              </div>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4 mt-6">
-            <div className="bg-gray-50 rounded-xl p-4">
-              <p className="text-xs text-gray-400 font-medium mb-1">Queue Size</p>
-              <p className="text-xl font-extrabold text-gray-900">2 Candidates</p>
-            </div>
-            <div className="bg-gray-50 rounded-xl p-4">
-              <p className="text-xs text-gray-400 font-medium mb-1">Active Rooms</p>
-              <p className="text-xl font-extrabold text-gray-900">8 / 20</p>
-            </div>
-          </div>
         </div>
       </div>
+
+      {showNew && (
+        <NewSessionModal
+          onClose={() => setShowNew(false)}
+          onCreated={() => setReloadKey((k) => k + 1)}
+        />
+      )}
     </div>
   )
 }

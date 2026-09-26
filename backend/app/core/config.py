@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     GITHUB_CLIENT_ID: str = ""
     GITHUB_CLIENT_SECRET: str = ""
     OAUTH_REDIRECT_URI: str = "http://localhost:5173/auth/callback"
+    FRONTEND_URL: str = "http://localhost:5173"
 
     @property
     def cors_origins_list(self) -> List[str]:
