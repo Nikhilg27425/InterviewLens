@@ -114,7 +114,7 @@ export default function CandidateLogin() {
 
         {/* Footer */}
         <div className="relative z-10 flex items-center gap-5 text-cyan-300/60 text-xs">
-          <span>© 2024 InterviewLens Inc.</span>
+          <span>© 2026 InterviewLens Inc.</span>
           <a href="#" className="hover:text-white transition-colors">Privacy</a>
           <a href="#" className="hover:text-white transition-colors">Terms</a>
           <a href="#" className="hover:text-white transition-colors">Support</a>

@@ -108,7 +108,7 @@ export default function LoginPage() {
 
         {/* Footer */}
         <div className="relative z-10 flex items-center gap-6 text-purple-300 text-xs">
-          <span>© 2024 InterviewLens Inc.</span>
+          <span>© 2026 InterviewLens Inc.</span>
           <a href="#" className="hover:text-white transition-colors">Privacy Policy</a>
           <a href="#" className="hover:text-white transition-colors">Terms of Service</a>
         </div>

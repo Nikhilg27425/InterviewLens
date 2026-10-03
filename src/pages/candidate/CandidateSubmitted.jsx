@@ -200,7 +200,7 @@ export default function CandidateSubmitted() {
           </div>
 
           <p className="text-center text-xs text-gray-400 pb-6">
-            © 2024 InterviewLens Inc. · <a href="#" className="hover:text-gray-600">Privacy Policy</a> · <a href="#" className="hover:text-gray-600">Candidate Rights</a>
+            © 2026 InterviewLens Inc. · <a href="#" className="hover:text-gray-600">Privacy Policy</a> · <a href="#" className="hover:text-gray-600">Candidate Rights</a>
           </p>
         </div>
       </div>

@@ -1,6 +1,6 @@
-import React, { useState } from 'react'
+import React from 'react'
 import { Link } from 'react-router-dom'
-import { Eye, Play, ArrowRight, Check, ChevronRight, Github, Twitter, Linkedin } from 'lucide-react'
+import { ArrowRight, Check, Scale, Shield, Eye, Brain, Users, Code2, Video, AlertTriangle, BarChart3, FileSearch, Clock, Database } from 'lucide-react'
 import Logo from '../components/Logo'
 
 function LandingNavbar() {
@@ -9,27 +9,29 @@ function LandingNavbar() {
       <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
         <Logo size="md" />
         <div className="hidden md:flex items-center gap-8">
-          {['Features', 'Architecture', 'Solutions', 'Pricing'].map((item) => (
-            <a key={item} href={`#${item.toLowerCase()}`} className="text-sm text-gray-600 hover:text-gray-900 font-medium transition-colors">
-              {item}
+          {[
+            { label: 'The Problem', href: '#problem' },
+            { label: 'Our Solution', href: '#solution' },
+            { label: 'Candidate Portal', href: '#candidate-portal' },
+            { label: 'Interviewer Portal', href: '#interviewer-portal' }
+          ].map((item) => (
+            <a key={item.label} href={item.href} className="text-sm text-gray-600 hover:text-gray-900 font-medium transition-colors">
+              {item.label}
             </a>
           ))}
         </div>
         <div className="flex items-center gap-3">
           <Link
             to="/candidate/login"
-            className="text-sm font-medium text-emerald-700 hover:text-emerald-900 border border-emerald-200 bg-emerald-50 px-3 py-1.5 rounded-lg hover:bg-emerald-100 transition-colors"
+            className="text-sm font-semibold text-emerald-700 hover:text-emerald-900 border border-emerald-200 bg-emerald-50 px-4 py-2 rounded-lg hover:bg-emerald-100 transition-colors"
           >
-            Candidate Portal
-          </Link>
-          <Link to="/login" className="text-sm font-medium text-gray-700 hover:text-gray-900">
-            Log In
+            Candidate Login
           </Link>
           <Link
             to="/login"
             className="bg-blue-600 text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
           >
-            Get Started
+            Interviewer Login
           </Link>
         </div>
       </div>
@@ -43,48 +45,24 @@ function HeroSection() {
       <div className="max-w-7xl mx-auto">
         <div className="grid lg:grid-cols-2 gap-12 items-center">
           <div>
-            <div className="inline-flex items-center gap-2 bg-blue-50 text-blue-700 text-xs font-semibold px-3 py-1.5 rounded-full mb-6">
-              <span className="w-1.5 h-1.5 bg-blue-500 rounded-full" />
-              New: AI-Driven Behavioral Analysis
-            </div>
-            <h1 className="text-5xl font-extrabold text-gray-900 leading-tight mb-4">
-              Make technical interviews{' '}
-              <span className="text-blue-600">more reliable</span>
+            <h1 className="text-5xl font-extrabold text-gray-900 leading-tight mb-6">
+              Transform your technical hiring with{' '}
+              <span className="text-blue-600">precision and fairness</span>
             </h1>
             <p className="text-lg text-gray-500 leading-relaxed mb-8 max-w-lg">
-              The AI-powered platform for engineering managers and recruiters. Gain real-time insights, ensure fair assessments, and automate plagiarism detection with surgical precision.
+              An enterprise-grade platform built for engineering managers and technical recruiters. Ensure objective assessments, maintain interview integrity, and make data-driven hiring decisions with confidence.
             </p>
-            <div className="flex items-center gap-4 mb-10">
+            <div className="flex items-center gap-4">
               <Link
                 to="/login"
-                className="flex items-center gap-2 bg-blue-600 text-white font-semibold px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors"
+                className="flex items-center gap-2 bg-blue-600 text-white font-semibold px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors shadow-md"
               >
-                Start Free Trial <ArrowRight size={16} />
+                Interviewer Login <ArrowRight size={16} />
               </Link>
-              <button className="flex items-center gap-2 text-gray-700 font-semibold px-6 py-3 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors">
-                <Play size={14} className="text-blue-600" fill="#2563EB" />
-                Watch Demo
-              </button>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="flex -space-x-2">
-                {['#3B82F6', '#10B981', '#F59E0B'].map((color, i) => (
-                  <div
-                    key={i}
-                    className="w-8 h-8 rounded-full border-2 border-white flex items-center justify-center text-white text-xs font-bold"
-                    style={{ backgroundColor: color }}
-                  >
-                    {String.fromCharCode(65 + i)}
-                  </div>
-                ))}
-              </div>
-              <p className="text-sm text-gray-500">
-                Joined by <span className="font-semibold text-gray-900">500+</span> engineering teams this month
-              </p>
             </div>
           </div>
 
-          {/* Hero visual */}
+          {/* Hero visual - Code Editor Mockup */}
           <div className="relative flex justify-center">
             <div className="relative">
               <div className="absolute inset-0 bg-blue-100 rounded-full scale-110 opacity-40" />
@@ -122,7 +100,7 @@ function HeroSection() {
               {/* Floating alert badge */}
               <div className="absolute -bottom-4 -left-6 bg-white rounded-xl shadow-lg px-4 py-2.5 flex items-center gap-2 border border-gray-100">
                 <div className="w-8 h-8 bg-orange-100 rounded-lg flex items-center justify-center">
-                  <span className="text-orange-600 text-sm">⚠</span>
+                  <AlertTriangle size={16} className="text-orange-600" />
                 </div>
                 <div>
                   <p className="text-xs font-semibold text-gray-800">Risk Signal Detected</p>
@@ -137,207 +115,352 @@ function HeroSection() {
   )
 }
 
-function FeaturesSection() {
-  const features = [
+function ProblemSection() {
+  return (
+    <section id="problem" className="py-24 bg-white">
+      <div className="max-w-7xl mx-auto px-6">
+        <div className="text-center mb-16">
+          <h2 className="text-4xl font-bold text-gray-900 mb-4">The Challenge of Fair Technical Assessment</h2>
+          <p className="text-lg text-gray-500 max-w-3xl mx-auto">
+            Technical hiring faces critical challenges that undermine the quality and fairness of candidate evaluation. Traditional interview methods leave organizations vulnerable to bias and compromise.
+          </p>
+        </div>
+        
+        <div className="grid md:grid-cols-2 gap-8 max-w-5xl mx-auto">
+          {/* Bias & Inconsistency */}
+          <div className="bg-gradient-to-br from-red-50 to-orange-50 rounded-2xl p-8 border border-red-100">
+            <div className="w-14 h-14 bg-red-100 rounded-xl flex items-center justify-center mb-6">
+              <Scale size={28} className="text-red-600" />
+            </div>
+            <h3 className="text-2xl font-bold text-gray-900 mb-4">Bias & Inconsistency</h3>
+            <p className="text-gray-600 mb-6 leading-relaxed">
+              Traditional interviews suffer from subjective evaluation, creating unfair outcomes for candidates and unreliable hiring decisions for organizations.
+            </p>
+            <ul className="space-y-3">
+              {[
+                'Subjective evaluation varies between interviewers',
+                'Inconsistent standards across interview sessions',
+                'Unconscious bias affects candidate assessment',
+                'Lack of transparency in evaluation criteria',
+                'No objective data to support hiring decisions'
+              ].map((item, i) => (
+                <li key={i} className="flex items-start gap-3 text-sm text-gray-700">
+                  <div className="w-1.5 h-1.5 bg-red-600 rounded-full mt-2 flex-shrink-0" />
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {/* Integrity & Cheating */}
+          <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl p-8 border border-blue-100">
+            <div className="w-14 h-14 bg-blue-100 rounded-xl flex items-center justify-center mb-6">
+              <Shield size={28} className="text-blue-600" />
+            </div>
+            <h3 className="text-2xl font-bold text-gray-900 mb-4">Integrity & Cheating</h3>
+            <p className="text-gray-600 mb-6 leading-relaxed">
+              Remote interviews introduce significant risks of dishonesty, with candidates leveraging unauthorized resources that compromise assessment validity.
+            </p>
+            <ul className="space-y-3">
+              {[
+                'Code plagiarism from online repositories',
+                'Unauthorized external assistance during interviews',
+                'Tab switching to access reference materials',
+                'Copy-paste from prepared solutions',
+                'No verification of code authenticity'
+              ].map((item, i) => (
+                <li key={i} className="flex items-start gap-3 text-sm text-gray-700">
+                  <div className="w-1.5 h-1.5 bg-blue-600 rounded-full mt-2 flex-shrink-0" />
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+
+        {/* Impact Statement */}
+        <div className="mt-12 text-center">
+          <p className="text-lg font-semibold text-gray-700 max-w-3xl mx-auto">
+            These challenges result in <span className="text-red-600">costly mis-hires</span>, <span className="text-red-600">overlooked talent</span>, and <span className="text-red-600">erosion of team quality</span> over time.
+          </p>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function SolutionSection() {
+  const solutions = [
     {
-      icon: '👁',
-      title: 'Live Monitoring',
-      desc: 'Watch candidates code in real-time with zero latency. Track focus and environment stability instantly.',
+      icon: Eye,
+      title: 'Real-Time Monitoring',
+      desc: 'Continuous oversight with live code synchronization, video streaming, and behavioral tracking ensures complete visibility throughout the interview process.',
     },
     {
-      icon: '🔍',
-      title: 'Similarity Analysis',
-      desc: 'Detect plagiarism across millions of open-source repositories and internal interview banks.',
+      icon: Brain,
+      title: 'AI-Powered Analysis',
+      desc: 'Advanced algorithms leverage TF-IDF vectorization and AST-based comparison to detect plagiarism and assess code quality with 99.8% accuracy.',
     },
     {
-      icon: '🧠',
-      title: 'Behavioral Insights',
-      desc: 'AI-driven analysis of problem-solving patterns and communication clarity during the technical session.',
+      icon: Users,
+      title: 'Dual Portal System',
+      desc: 'Purpose-built experiences for candidates and interviewers ensure optimal workflows, transparent communication, and fair assessment processes.',
     },
   ]
 
   return (
-    <section id="features" className="py-24 bg-white">
+    <section id="solution" className="py-24 bg-gray-50">
       <div className="max-w-7xl mx-auto px-6">
         <div className="text-center mb-16">
-          <h2 className="text-3xl font-bold text-gray-900 mb-4">Hiring tools built for precision</h2>
-          <p className="text-gray-500 max-w-xl mx-auto">
-            Stop guessing and start measuring. Our platform provides the technical depth recruiters need and the intuitive interface engineering managers love.
+          <h2 className="text-4xl font-bold text-gray-900 mb-4">A Comprehensive Platform for Fair, Secure Interviews</h2>
+          <p className="text-lg text-gray-500 max-w-3xl mx-auto">
+            InterviewLens combines cutting-edge technology with human-centered design to deliver an interview platform that ensures objectivity, maintains integrity, and empowers data-driven hiring decisions.
           </p>
         </div>
+        
         <div className="grid md:grid-cols-3 gap-8">
-          {features.map(({ icon, title, desc }) => (
-            <div key={title} className="text-center p-8 rounded-2xl border border-gray-100 hover:border-blue-100 hover:shadow-md transition-all group">
-              <div className="w-12 h-12 bg-blue-50 rounded-xl flex items-center justify-center text-2xl mb-5 mx-auto group-hover:bg-blue-100 transition-colors">
-                {icon}
+          {solutions.map(({ icon: Icon, title, desc }) => (
+            <div key={title} className="bg-white rounded-2xl p-8 border border-gray-100 hover:border-blue-200 hover:shadow-lg transition-all group">
+              <div className="w-14 h-14 bg-blue-50 rounded-xl flex items-center justify-center mb-6 group-hover:bg-blue-100 transition-colors">
+                <Icon size={28} className="text-blue-600" />
               </div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-3">{title}</h3>
-              <p className="text-gray-500 text-sm leading-relaxed">{desc}</p>
+              <h3 className="text-xl font-bold text-gray-900 mb-3">{title}</h3>
+              <p className="text-gray-600 leading-relaxed">{desc}</p>
             </div>
           ))}
         </div>
+
+        {/* Key Differentiators */}
+        <div className="mt-16 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl p-8 text-white">
+          <div className="grid md:grid-cols-3 gap-8 text-center">
+            <div>
+              <p className="text-4xl font-extrabold mb-2">99.8%</p>
+              <p className="text-blue-100 text-sm">Plagiarism detection accuracy across 20+ languages</p>
+            </div>
+            <div>
+              <p className="text-4xl font-extrabold mb-2">&lt;2s</p>
+              <p className="text-blue-100 text-sm">Average code similarity analysis time</p>
+            </div>
+            <div>
+              <p className="text-4xl font-extrabold mb-2">Zero</p>
+              <p className="text-blue-100 text-sm">Latency real-time code synchronization</p>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
   )
 }
 
-function MonitoringSection() {
+function CandidatePortalSection() {
+  const features = [
+    {
+      icon: Code2,
+      title: 'Browser-Based Code Editor',
+      desc: 'Write code directly in your browser with syntax highlighting for JavaScript, Python, Java, C++, C#, Go, Ruby, and TypeScript. No downloads or setup required.',
+    },
+    {
+      icon: AlertTriangle,
+      title: 'Real-Time Code Execution',
+      desc: 'Test your solutions instantly with Judge0 integration. Receive immediate feedback on test cases, execution time, and output validation.',
+    },
+    {
+      icon: Video,
+      title: 'Live Video Feed',
+      desc: 'WebRTC-based camera streaming provides transparent proctoring. Know exactly what is being monitored during your interview session.',
+    },
+    {
+      icon: FileSearch,
+      title: 'Clean Problem Interface',
+      desc: 'Access clear problem statements, detailed test cases, and example inputs. Track your submission status and execution results in real-time.',
+    },
+    {
+      icon: Shield,
+      title: 'Fair Monitoring',
+      desc: 'Transparent integrity checks with visible alerts. No hidden surveillance—you are notified of all proctoring activities and signals.',
+    },
+    {
+      icon: Database,
+      title: 'Multiple Language Support',
+      desc: 'Choose from 20+ programming languages. Work in the language you are most comfortable with for optimal performance.',
+    },
+  ]
+
   return (
-    <section className="py-24 bg-gray-50">
+    <section id="candidate-portal" className="py-24 bg-white">
       <div className="max-w-7xl mx-auto px-6">
-        <div className="grid lg:grid-cols-2 gap-16 items-center">
-          <div>
-            <p className="text-xs font-bold tracking-widest text-blue-600 uppercase mb-3">Real-time Oversight</p>
-            <h2 className="text-4xl font-bold text-gray-900 mb-6">
-              Keep every interview<br />under your lens
-            </h2>
-            <p className="text-gray-500 mb-8 leading-relaxed">
-              Our live monitoring suite gives you an eagle-eye view of the candidate's environment. Identify potential red flags before they become issues, ensuring a fair and consistent experience for every applicant.
-            </p>
-            <ul className="space-y-3 mb-8">
+        <div className="text-center mb-16">
+          <div className="inline-flex items-center gap-2 bg-emerald-50 text-emerald-700 text-xs font-semibold px-4 py-2 rounded-full mb-4">
+            <span className="w-2 h-2 bg-emerald-500 rounded-full" />
+            For Candidates
+          </div>
+          <h2 className="text-4xl font-bold text-gray-900 mb-4">Candidate Portal: Fair, Transparent Assessment</h2>
+          <p className="text-lg text-gray-500 max-w-3xl mx-auto">
+            A streamlined coding environment designed to showcase your skills without technical barriers. Focus on problem-solving with a clean interface, fair evaluation, and transparent monitoring.
+          </p>
+        </div>
+
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {features.map(({ icon: Icon, title, desc }) => (
+            <div key={title} className="bg-white rounded-xl p-6 border border-gray-100 hover:border-emerald-200 hover:shadow-md transition-all">
+              <div className="w-12 h-12 bg-emerald-50 rounded-lg flex items-center justify-center mb-4">
+                <Icon size={24} className="text-emerald-600" />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">{title}</h3>
+              <p className="text-sm text-gray-600 leading-relaxed">{desc}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* Additional Benefits */}
+        <div className="mt-12 bg-emerald-50 rounded-2xl p-8 border border-emerald-100">
+          <h3 className="text-xl font-bold text-gray-900 mb-6 text-center">Built for Candidate Success</h3>
+          <div className="grid md:grid-cols-2 gap-x-8 gap-y-4 max-w-4xl mx-auto">
+            {[
+              'No software installation or environment setup',
+              'Instant feedback on code execution and test results',
+              'Clear visibility into proctoring and monitoring activities',
+              'Accessible from any modern web browser',
+              'Fair evaluation based on objective code performance',
+              'Transparent communication with interviewer via chat'
+            ].map((item, i) => (
+              <div key={i} className="flex items-center gap-3">
+                <Check size={18} className="text-emerald-600 flex-shrink-0" />
+                <span className="text-sm text-gray-700">{item}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function InterviewerPortalSection() {
+  const features = [
+    {
+      icon: Eye,
+      title: 'Live Code Monitoring',
+      desc: 'Watch candidates code in real-time with zero latency. View every keystroke, edit, and thought process as code evolves during the interview.',
+    },
+    {
+      icon: Video,
+      title: 'Video Feed Reception',
+      desc: 'Receive WebRTC video streams directly from candidates. Monitor facial expressions, environment, and behavior throughout the assessment.',
+    },
+    {
+      icon: AlertTriangle,
+      title: 'Proctoring Alerts',
+      desc: 'Automatic detection and notification of integrity risks including tab switches, multiple face detection, and clipboard usage events.',
+    },
+    {
+      icon: Users,
+      title: 'Session Management',
+      desc: 'Create interview sessions, assign coding problems, generate secure candidate access tokens, and track interview progress in real-time.',
+    },
+    {
+      icon: FileSearch,
+      title: 'Plagiarism Detection',
+      desc: 'TF-IDF vectorization and cosine similarity analysis detect code plagiarism with 99.8% accuracy. AST-based comparison identifies structural copying.',
+    },
+    {
+      icon: BarChart3,
+      title: 'Analytics Dashboard',
+      desc: 'Comprehensive metrics including engagement scores, performance trends, submission timing, and behavioral pattern analysis.',
+    },
+    {
+      icon: Code2,
+      title: 'Code Analysis',
+      desc: 'Detailed submission review with execution results, test case validation, runtime performance, and code quality assessment.',
+    },
+    {
+      icon: Clock,
+      title: 'Interview History',
+      desc: 'Complete records of all interviews with code snapshots, proctoring signals, submission history, and exportable assessment data.',
+    },
+  ]
+
+  return (
+    <section id="interviewer-portal" className="py-24 bg-gray-900 text-white">
+      <div className="max-w-7xl mx-auto px-6">
+        <div className="text-center mb-16">
+          <div className="inline-flex items-center gap-2 bg-blue-500/20 text-blue-300 text-xs font-semibold px-4 py-2 rounded-full mb-4">
+            <span className="w-2 h-2 bg-blue-400 rounded-full" />
+            For Interviewers
+          </div>
+          <h2 className="text-4xl font-bold mb-4">Interviewer Portal: Powerful Insights, Complete Control</h2>
+          <p className="text-lg text-gray-400 max-w-3xl mx-auto">
+            Gain comprehensive oversight of technical interviews with enterprise-grade monitoring, AI-powered analysis, and data-driven decision tools. Make confident hiring decisions backed by objective data.
+          </p>
+        </div>
+
+        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
+          {features.map(({ icon: Icon, title, desc }) => (
+            <div key={title} className="bg-gray-800 rounded-xl p-6 border border-gray-700 hover:border-blue-500 hover:bg-gray-800/80 transition-all">
+              <div className="w-12 h-12 bg-blue-500/20 rounded-lg flex items-center justify-center mb-4">
+                <Icon size={24} className="text-blue-400" />
+              </div>
+              <h3 className="text-lg font-semibold mb-2">{title}</h3>
+              <p className="text-sm text-gray-400 leading-relaxed">{desc}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* Trust Indicators */}
+        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl p-8">
+          <div className="grid md:grid-cols-3 gap-8 text-center">
+            <div>
+              <p className="text-4xl font-extrabold mb-2">99.8%</p>
+              <p className="text-blue-100 text-sm">Detection accuracy across 20+ programming languages</p>
+            </div>
+            <div>
+              <p className="text-4xl font-extrabold mb-2">&lt;2s</p>
+              <p className="text-blue-100 text-sm">Average similarity analysis time per session</p>
+            </div>
+            <div>
+              <p className="text-4xl font-extrabold mb-2">Real-time</p>
+              <p className="text-blue-100 text-sm">Zero latency code synchronization and monitoring</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Key Capabilities */}
+        <div className="mt-12 grid md:grid-cols-2 gap-8">
+          <div className="bg-gray-800 rounded-xl p-6 border border-gray-700">
+            <h3 className="text-xl font-bold mb-4">Real-Time Monitoring Capabilities</h3>
+            <ul className="space-y-3">
               {[
-                'Multi-tab switching detection',
-                'Clipboard monitor & usage alerts',
-                'Interactive interviewer-to-candidate chat',
-                'Low-latency screen streaming',
-              ].map((item) => (
-                <li key={item} className="flex items-center gap-3 text-gray-700 text-sm">
-                  <Check size={16} className="text-blue-600 flex-shrink-0" />
-                  {item}
+                'Live code synchronization with zero latency',
+                'WebRTC video feed from candidate camera',
+                'Automatic proctoring signal detection',
+                'Interactive chat with candidates',
+                'Real-time test execution results'
+              ].map((item, i) => (
+                <li key={i} className="flex items-center gap-3 text-sm text-gray-300">
+                  <Check size={18} className="text-blue-400 flex-shrink-0" />
+                  <span>{item}</span>
                 </li>
               ))}
             </ul>
-            <button className="flex items-center gap-1.5 text-blue-600 font-semibold text-sm hover:underline">
-              Explore Monitoring <ChevronRight size={16} />
-            </button>
           </div>
-          <div className="rounded-2xl overflow-hidden shadow-xl">
-            <img
-              src="https://images.unsplash.com/photo-1518770660439-4636190af475?w=600&q=80"
-              alt="Monitoring system"
-              className="w-full h-72 object-cover"
-            />
-          </div>
-        </div>
-      </div>
-    </section>
-  )
-}
 
-function CodeOriginalitySection() {
-  return (
-    <section className="py-24 bg-gray-900 text-white">
-      <div className="max-w-7xl mx-auto px-6">
-        <div className="grid lg:grid-cols-2 gap-16 items-center">
-          <div className="rounded-2xl overflow-hidden">
-            <img
-              src="https://images.unsplash.com/photo-1555066931-4365d14bab8c?w=600&q=80"
-              alt="Code editor"
-              className="w-full h-72 object-cover"
-            />
-          </div>
-          <div>
-            <p className="text-xs font-bold tracking-widest text-blue-400 uppercase mb-3">Advanced Integrity</p>
-            <h2 className="text-4xl font-bold mb-6">
-              Identity-verified<br />code originality
-            </h2>
-            <p className="text-gray-400 mb-8 leading-relaxed">
-              Go beyond simple string matching. Our engine uses AST-based analysis to detect structural similarity even if the candidate renames variables or refactors logic to hide external libraries.
-            </p>
-            <div className="flex gap-10 mb-8">
-              <div>
-                <p className="text-3xl font-extrabold text-blue-400">99.8%</p>
-                <p className="text-gray-400 text-xs mt-1">Detection accuracy across 20+ languages</p>
-              </div>
-              <div>
-                <p className="text-3xl font-extrabold text-blue-400">&lt;2s</p>
-                <p className="text-gray-400 text-xs mt-1">Average analysis time per session</p>
-              </div>
-            </div>
-            <Link
-              to="/login"
-              className="inline-flex items-center gap-2 bg-blue-600 text-white font-semibold px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              Try Similarity Check
-            </Link>
-          </div>
-        </div>
-      </div>
-    </section>
-  )
-}
-
-function InfraSection() {
-  return (
-    <section id="architecture" className="py-24 bg-white">
-      <div className="max-w-7xl mx-auto px-6">
-        <div className="grid lg:grid-cols-2 gap-16 items-center">
-          <div>
-            <h2 className="text-4xl font-bold text-gray-900 mb-6">
-              Enterprise-grade<br />infrastructure
-            </h2>
-            <p className="text-gray-500 mb-8 leading-relaxed">
-              Built on a globally distributed serverless architecture to ensure maximum reliability and sub-millisecond latency for live interview sessions.
-            </p>
-            <ul className="space-y-5 mb-10">
+          <div className="bg-gray-800 rounded-xl p-6 border border-gray-700">
+            <h3 className="text-xl font-bold mb-4">Post-Interview Analysis</h3>
+            <ul className="space-y-3">
               {[
-                { icon: '⚡', title: 'Edge-Computing Nodes', desc: 'Low-latency streaming via AWS Global Accelerator' },
-                { icon: '🔒', title: 'End-to-End Encryption', desc: 'AES-256 encryption for all interview recordings' },
-                { icon: '🔧', title: 'Highly Scalable APIs', desc: 'Built on top of GraphQL for high-performance data fetching' },
-              ].map(({ icon, title, desc }) => (
-                <li key={title} className="flex items-start gap-4">
-                  <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center text-lg flex-shrink-0">
-                    {icon}
-                  </div>
-                  <div>
-                    <p className="font-semibold text-gray-900 text-sm">{title}</p>
-                    <p className="text-gray-500 text-sm">{desc}</p>
-                  </div>
+                'Code similarity analysis and plagiarism detection',
+                'Complete interview replay with code snapshots',
+                'Behavioral pattern analysis and insights',
+                'Performance metrics and engagement tracking',
+                'Exportable assessment reports'
+              ].map((item, i) => (
+                <li key={i} className="flex items-center gap-3 text-sm text-gray-300">
+                  <Check size={18} className="text-blue-400 flex-shrink-0" />
+                  <span>{item}</span>
                 </li>
               ))}
             </ul>
-            <div className="grid grid-cols-2 gap-4 pt-6 border-t border-gray-100">
-              <div className="flex items-center gap-2 text-sm text-gray-500">
-                <span className="w-5 h-5 text-base">🔗</span>
-                Microservices Mesh — Isolating compute for code execution
-              </div>
-              <div className="flex items-center gap-2 text-sm text-gray-500">
-                <span className="w-5 h-5 text-base">📊</span>
-                Real-time Analytics — Post-interview AI scoring pipeline
-              </div>
-            </div>
           </div>
-          <div className="rounded-2xl overflow-hidden shadow-xl">
-            <img
-              src="https://images.unsplash.com/photo-1558494949-ef010cbdcc31?w=600&q=80"
-              alt="Server infrastructure"
-              className="w-full h-80 object-cover"
-            />
-          </div>
-        </div>
-      </div>
-    </section>
-  )
-}
-
-function CTASection() {
-  return (
-    <section className="py-24 bg-blue-600">
-      <div className="max-w-3xl mx-auto px-6 text-center">
-        <h2 className="text-4xl font-extrabold text-white mb-4">Ready to scale your hiring?</h2>
-        <p className="text-blue-200 mb-10 text-lg">
-          Join hundreds of engineering teams using InterviewLens to hire better, faster, and more reliably. Start your 14-day free trial today. No credit card required.
-        </p>
-        <div className="flex items-center justify-center gap-4">
-          <Link
-            to="/login"
-            className="bg-white text-blue-600 font-bold px-8 py-3.5 rounded-lg hover:bg-blue-50 transition-colors shadow-md"
-          >
-            Start My Trial
-          </Link>
-          <button className="border-2 border-white text-white font-bold px-8 py-3.5 rounded-lg hover:bg-white/10 transition-colors">
-            Talk to Sales
-          </button>
         </div>
       </div>
     </section>
@@ -345,49 +468,26 @@ function CTASection() {
 }
 
 function Footer() {
-  const links = {
-    Product: ['Features', 'Integrations', 'Pricing', 'Changelog'],
-    Resources: ['Documentation', 'API Reference', 'Help Center', 'Blog'],
-    Company: ['About Us', 'Careers', 'Security', 'Contact'],
-  }
-
   return (
-    <footer className="bg-white border-t border-gray-100 py-16 px-6">
+    <footer className="bg-white border-t border-gray-100 py-12 px-6">
       <div className="max-w-7xl mx-auto">
-        <div className="grid md:grid-cols-5 gap-8 mb-12">
-          <div className="md:col-span-2">
-            <Logo size="md" />
-            <p className="text-gray-500 text-sm mt-3 leading-relaxed max-w-xs">
-              Elevating technical recruitment through precision monitoring and AI-driven insights. Driving engineering excellence.
-            </p>
-            <div className="flex gap-3 mt-5">
-              {[Twitter, Github, Linkedin].map((Icon, i) => (
-                <button key={i} className="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center text-gray-500 hover:bg-blue-50 hover:text-blue-600 transition-colors">
-                  <Icon size={14} />
-                </button>
-              ))}
-            </div>
+        <div className="flex flex-col items-center text-center">
+          <Logo size="md" />
+          <p className="text-gray-500 text-sm mt-4 leading-relaxed max-w-md">
+            Elevating technical recruitment through precision monitoring and AI-driven insights. Driving engineering excellence.
+          </p>
+          <div className="mt-4">
+            <a 
+              href="mailto:contact.interviewlens@gmail.com" 
+              className="text-sm text-blue-600 hover:text-blue-700 font-medium transition-colors"
+            >
+              contact.interviewlens@gmail.com
+            </a>
           </div>
-          {Object.entries(links).map(([section, items]) => (
-            <div key={section}>
-              <p className="font-semibold text-gray-900 text-sm mb-3">{section}</p>
-              <ul className="space-y-2">
-                {items.map((item) => (
-                  <li key={item}>
-                    <a href="#" className="text-sm text-gray-500 hover:text-gray-900 transition-colors">{item}</a>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
         </div>
-        <div className="pt-6 border-t border-gray-100 flex flex-col md:flex-row justify-between items-center gap-3">
-          <p className="text-xs text-gray-400">© 2024 InterviewLens Inc. All rights reserved.</p>
-          <div className="flex gap-6">
-            {['Privacy Policy', 'Terms of Service', 'Cookie Settings'].map((item) => (
-              <a key={item} href="#" className="text-xs text-gray-400 hover:text-gray-700 transition-colors">{item}</a>
-            ))}
-          </div>
+        
+        <div className="pt-8 mt-8 border-t border-gray-100 text-center">
+          <p className="text-xs text-gray-400">© 2026 InterviewLens Inc. All rights reserved.</p>
         </div>
       </div>
     </footer>
@@ -399,11 +499,10 @@ export default function LandingPage() {
     <div className="min-h-screen">
       <LandingNavbar />
       <HeroSection />
-      <FeaturesSection />
-      <MonitoringSection />
-      <CodeOriginalitySection />
-      <InfraSection />
-      <CTASection />
+      <ProblemSection />
+      <SolutionSection />
+      <CandidatePortalSection />
+      <InterviewerPortalSection />
       <Footer />
     </div>
   )
