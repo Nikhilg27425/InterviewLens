@@ -39,6 +39,7 @@ class InterviewSession(Base):
     candidate_name: Mapped[str | None]  = mapped_column(String(255), nullable=True)
     candidate_email: Mapped[str | None] = mapped_column(String(255), nullable=True)  # Email for validation
     candidate_role: Mapped[str | None]  = mapped_column(String(255), nullable=True)
+    invite_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Notes / summary (filled post-session)
     notes: Mapped[str | None]   = mapped_column(Text, nullable=True)

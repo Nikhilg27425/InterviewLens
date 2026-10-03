@@ -55,5 +55,30 @@ class UserOut(BaseModel):
     created_at: datetime
     oauth_provider: str | None = None
     profile_picture: str | None = None
+    has_password: bool = True
 
     model_config = {"from_attributes": True}
+
+
+class ProfileUpdate(BaseModel):
+    full_name: str | None = None
+    company: str | None = None
+
+    @field_validator("full_name")
+    @classmethod
+    def not_blank(cls, v: str | None) -> str | None:
+        if v is not None and not v.strip():
+            raise ValueError("Name can't be empty")
+        return v.strip() if v else v
+
+
+class PasswordChange(BaseModel):
+    current_password: str | None = None   # not required for OAuth-only accounts setting a first password
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def password_strength(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters")
+        return v

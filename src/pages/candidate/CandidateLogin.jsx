@@ -1,8 +1,8 @@
-import React, { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import React, { useEffect, useRef, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Mail, Lock, Eye, EyeOff, Info, ArrowRight, CheckCircle } from 'lucide-react'
 import Logo from '../../components/Logo'
-import { authAPI, sessionsAPI } from '../../services/api'
+import { authAPI, sessionsAPI, candidateSession } from '../../services/api'
 
 const perks = [
   {
@@ -24,10 +24,24 @@ const perks = [
 
 export default function CandidateLogin() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const [showPassword, setShowPassword] = useState(false)
-  const [form, setForm] = useState({ email: '', token: '' })
+  // The invite email links here with ?email=&token= so candidates join in one click
+  const [form, setForm] = useState({
+    email: searchParams.get('email') || '',
+    token: searchParams.get('token') || '',
+  })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const autoSubmitted = useRef(false)
+
+  useEffect(() => {
+    if (!autoSubmitted.current && searchParams.get('email') && searchParams.get('token')) {
+      autoSubmitted.current = true
+      signIn(form.email, form.token)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const handleSubmit = (e) => {
     e.preventDefault()
@@ -35,17 +49,25 @@ export default function CandidateLogin() {
       setError('Please enter both your email and the access token from your invite.')
       return
     }
+    signIn(form.email, form.token)
+  }
+
+  function signIn(rawEmail, rawToken) {
     setError('')
     setLoading(true)
-    authAPI.loginCandidate(form.email, form.token)
-      .then(({ data }) => {
-        localStorage.setItem('access_token', data.access_token)
-        localStorage.setItem('user_id', data.user_id)
-        localStorage.setItem('user', JSON.stringify({ id: data.user_id, name: data.full_name, role: data.role }))
-        return sessionsAPI.getByToken(form.token)
-      })
-      .then(({ data: sess }) => {
-        localStorage.setItem('session_id', sess.id)
+    const accessToken = rawToken.trim().toUpperCase()
+    const email = rawEmail.trim()
+    Promise.all([
+      authAPI.loginCandidate(email, accessToken),
+      sessionsAPI.getByToken(accessToken),
+    ])
+      .then(([{ data }, { data: sess }]) => {
+        candidateSession.save({
+          token: data.access_token,
+          user: { id: data.user_id, full_name: data.full_name, role: data.role },
+          sessionId: sess.id,
+          accessToken,
+        })
         setLoading(false)
         navigate('/candidate/waiting-room')
       })
@@ -54,7 +76,6 @@ export default function CandidateLogin() {
         // Show actual error instead of bypassing to demo mode
         const errorMessage = err.response?.data?.detail || err.message || 'Authentication failed. Please check your credentials.'
         setError(errorMessage)
-        console.error('Candidate login error:', err)
       })
   }
 

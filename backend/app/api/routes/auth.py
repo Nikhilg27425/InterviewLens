@@ -1,6 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+import logging
+import secrets
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_
+from sqlalchemy import select, or_, func
 from starlette.responses import RedirectResponse
 import httpx
 from urllib.parse import urlencode
@@ -10,22 +12,48 @@ from app.models.user import User, UserRole
 from app.models.session import InterviewSession, SessionStatus
 from app.core.security import hash_password, verify_password, create_access_token
 from app.core.config import settings
-from app.schemas.user import UserCreate, UserLogin, CandidateLogin, TokenResponse, UserOut, CandidateCreate
+from app.schemas.user import (
+    UserCreate, UserLogin, CandidateLogin, TokenResponse, UserOut, CandidateCreate,
+    ProfileUpdate, PasswordChange,
+)
 from app.api.deps import get_current_user
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+OAUTH_STATE_COOKIE = "oauth_state"
+
+
+def _new_state(provider: str) -> str:
+    return f"{provider}:{secrets.token_urlsafe(24)}"
+
+
+def _redirect_with_state(url: str, state: str) -> RedirectResponse:
+    response = RedirectResponse(url=url)
+    response.set_cookie(
+        OAUTH_STATE_COOKIE, state, max_age=600, httponly=True, samesite="lax",
+        secure=settings.FRONTEND_URL.startswith("https"), path="/",
+    )
+    return response
+
+
+def _login_error(message: str) -> RedirectResponse:
+    response = RedirectResponse(url=f"{settings.FRONTEND_URL}/login?{urlencode({'error': message})}")
+    response.delete_cookie(OAUTH_STATE_COOKIE, path="/")
+    return response
 
 
 # ── Interviewer registration ──────────────────────────────────────────────────
 
 @router.post("/register", response_model=UserOut, status_code=201)
 async def register_interviewer(body: UserCreate, db: AsyncSession = Depends(get_db)):
-    existing = (await db.execute(select(User).where(User.email == body.email))).scalar_one_or_none()
+    email = body.email.strip().lower()
+    existing = (await db.execute(select(User).where(func.lower(User.email) == email))).scalar_one_or_none()
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
 
     user = User(
-        email=body.email,
+        email=email,
         full_name=body.full_name,
         hashed_password=hash_password(body.password),
         role=body.role,
@@ -40,14 +68,19 @@ async def register_interviewer(body: UserCreate, db: AsyncSession = Depends(get_
 
 @router.post("/login", response_model=TokenResponse)
 async def login_interviewer(body: UserLogin, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(User).where(User.email == body.email))
+    result = await db.execute(select(User).where(func.lower(User.email) == body.email.strip().lower()))
     user = result.scalar_one_or_none()
-    
+
     if not user:
         raise HTTPException(status_code=401, detail="Invalid credentials")
     
+    if user.role == UserRole.candidate:
+        raise HTTPException(status_code=403, detail="Candidates sign in through the candidate portal with their access token.")
+
     # Check if user is OAuth-only (no password set)
     if user.hashed_password is None:
+        if not user.oauth_provider:
+            raise HTTPException(status_code=401, detail="Invalid credentials")
         raise HTTPException(
             status_code=400, 
             detail=f"This account uses {user.oauth_provider} sign-in. Please use the {user.oauth_provider.title()} button to log in."
@@ -75,9 +108,11 @@ async def login_interviewer(body: UserLogin, db: AsyncSession = Depends(get_db))
 
 @router.post("/candidate/login", response_model=TokenResponse)
 async def login_candidate(body: CandidateLogin, db: AsyncSession = Depends(get_db)):
+    email = body.email.strip().lower()
+    access_token = body.access_token.strip().upper()
     # Verify session token exists and is not completed/cancelled
     sess_result = await db.execute(
-        select(InterviewSession).where(InterviewSession.access_token == body.access_token)
+        select(InterviewSession).where(InterviewSession.access_token == access_token)
     )
     session = sess_result.scalar_one_or_none()
     if not session:
@@ -86,22 +121,22 @@ async def login_candidate(body: CandidateLogin, db: AsyncSession = Depends(get_d
         raise HTTPException(status_code=410, detail="Session is no longer active")
 
     # SECURITY FIX: Verify email matches the session's intended candidate email
-    if session.candidate_email and session.candidate_email.lower() != body.email.lower():
+    if session.candidate_email and session.candidate_email.lower() != email:
         raise HTTPException(
             status_code=403, 
             detail=f"This session is assigned to {session.candidate_email}. Please use the correct email address."
         )
 
     # Get or create candidate user
-    user_result = await db.execute(select(User).where(User.email == body.email))
+    user_result = await db.execute(select(User).where(func.lower(User.email) == email))
     user = user_result.scalar_one_or_none()
 
     if not user:
         # Auto-create candidate account on first login
         user = User(
-            email=body.email,
-            full_name=session.candidate_name or body.email.split("@")[0],
-            hashed_password=hash_password(body.access_token),  # token is the initial password
+            email=email,
+            full_name=session.candidate_name or email.split("@")[0],
+            hashed_password=None,  # candidates authenticate with email + session token only
             role=UserRole.candidate,
         )
         db.add(user)
@@ -129,6 +164,9 @@ async def login_candidate(body: CandidateLogin, db: AsyncSession = Depends(get_d
             detail="This session is already assigned to another candidate."
         )
 
+    if session.status == SessionStatus.scheduled:
+        session.status = SessionStatus.waiting
+
     await db.commit()
 
     token = create_access_token(str(user.id), extra={"role": user.role, "session_id": str(session.id)})
@@ -147,13 +185,41 @@ async def me(current_user: User = Depends(get_current_user)):
     return current_user
 
 
+@router.patch("/me", response_model=UserOut)
+async def update_me(
+    body: ProfileUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    for field, value in body.model_dump(exclude_unset=True).items():
+        setattr(current_user, field, value or None if field == "company" else value)
+    await db.flush()
+    await db.refresh(current_user)
+    return current_user
+
+
+@router.post("/change-password", status_code=204)
+async def change_password(
+    body: PasswordChange,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.role == UserRole.candidate:
+        raise HTTPException(status_code=403, detail="Candidates don't have passwords")
+    if current_user.hashed_password and not verify_password(body.current_password or "", current_user.hashed_password):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    current_user.hashed_password = hash_password(body.new_password)
+    await db.flush()
+
+
 # ── OAuth: Google Login ───────────────────────────────────────────────────────
 
 @router.get("/google/login")
 async def google_login():
     """Initiate Google OAuth flow"""
     if not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_CLIENT_SECRET:
-        raise HTTPException(status_code=501, detail="Google OAuth not configured")
+        error = urlencode({"error": "Google sign-in is not configured on this server"})
+        return RedirectResponse(url=f"{settings.FRONTEND_URL}/login?{error}")
     
     # Build Google OAuth authorization URL
     params = {
@@ -163,18 +229,17 @@ async def google_login():
         "scope": "openid email profile",
         "access_type": "online",
         "prompt": "select_account",
-        "state": "google"  # Use state parameter to identify provider
+        "state": _new_state("google"),
     }
-    
-    auth_url = f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}"
-    return RedirectResponse(url=auth_url)
+    return _redirect_with_state(f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}", params["state"])
 
 
 @router.get("/github/login")
 async def github_login():
     """Initiate GitHub OAuth flow"""
     if not settings.GITHUB_CLIENT_ID or not settings.GITHUB_CLIENT_SECRET:
-        raise HTTPException(status_code=501, detail="GitHub OAuth not configured")
+        error = urlencode({"error": "GitHub sign-in is not configured on this server"})
+        return RedirectResponse(url=f"{settings.FRONTEND_URL}/login?{error}")
     
     # Build GitHub OAuth authorization URL
     params = {
@@ -182,22 +247,31 @@ async def github_login():
         "redirect_uri": settings.OAUTH_REDIRECT_URI,  # No provider parameter here
         "scope": "user:email",
         "allow_signup": "true",
-        "state": "github"  # Use state parameter to identify provider
+        "state": _new_state("github"),
     }
-    
-    auth_url = f"https://github.com/login/oauth/authorize?{urlencode(params)}"
-    return RedirectResponse(url=auth_url)
+    return _redirect_with_state(f"https://github.com/login/oauth/authorize?{urlencode(params)}", params["state"])
 
 
 @router.get("/oauth/callback")
 async def oauth_callback(
-    code: str,
-    state: str,  # Changed from 'provider' to 'state'
+    request: Request,
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+    error_description: str | None = None,
     db: AsyncSession = Depends(get_db)
 ):
     """Handle OAuth callback and create/login user"""
-    
-    provider = state  # state contains 'google' or 'github'
+    # User pressed "Cancel" on the provider's consent screen, or the provider errored
+    if error or not code:
+        message = error_description or ("Sign-in was cancelled" if error == "access_denied" else error) or "Sign-in failed"
+        return _login_error(message)
+
+    # CSRF: the state must match the one we issued to this browser
+    expected = request.cookies.get(OAUTH_STATE_COOKIE)
+    if not state or not expected or not secrets.compare_digest(state, expected):
+        return _login_error("Sign-in session expired. Please try again.")
+    provider = state.split(":", 1)[0]
     
     try:
         if provider == "google":
@@ -226,6 +300,8 @@ async def oauth_callback(
                 )
                 user_info = userinfo_response.json()
                 
+                if not user_info.get("verified_email"):
+                    raise HTTPException(status_code=400, detail="Your Google email address isn't verified")
                 email = user_info.get("email")
                 oauth_id = user_info.get("id")
                 full_name = user_info.get("name", email.split("@")[0])
@@ -271,7 +347,11 @@ async def oauth_callback(
                     }
                 )
                 emails = email_response.json()
-                primary_email = next((e["email"] for e in emails if e["primary"]), emails[0]["email"] if emails else None)
+                # Only verified addresses — sign-in links to existing accounts by email
+                verified = [e for e in emails if isinstance(e, dict) and e.get("verified")] if isinstance(emails, list) else []
+                primary_email = next((e["email"] for e in verified if e.get("primary")), verified[0]["email"] if verified else None)
+                if not primary_email:
+                    raise HTTPException(status_code=400, detail="Your GitHub account has no verified email address")
                 
                 email = primary_email
                 oauth_id = str(user_info.get("id"))
@@ -324,12 +404,18 @@ async def oauth_callback(
         token = create_access_token(str(user.id), extra={"role": user.role})
         
         # Redirect back to frontend with token
-        frontend_url = f"http://localhost:5173/auth/callback?token={token}&user_id={user.id}&full_name={user.full_name}&role={user.role}"
-        return RedirectResponse(url=frontend_url)
+        params = urlencode({
+            "token": token,
+            "user_id": str(user.id),
+            "full_name": user.full_name,
+            "role": user.role.value,
+        })
+        response = RedirectResponse(url=f"{settings.FRONTEND_URL}/auth/callback?{params}")
+        response.delete_cookie(OAUTH_STATE_COOKIE, path="/")
+        return response
         
-    except HTTPException:
-        raise
-    except Exception as e:
-        # Redirect to frontend with error
-        error_url = f"http://localhost:5173/login?error={str(e)}"
-        return RedirectResponse(url=error_url)
+    except HTTPException as e:
+        return _login_error(e.detail)
+    except Exception:
+        logger.exception("OAuth callback failed")
+        return _login_error("Sign-in failed. Please try again.")

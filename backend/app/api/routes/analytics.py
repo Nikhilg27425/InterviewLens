@@ -14,12 +14,13 @@ from app.models.similarity import SimilarityReport
 from app.models.submission import Submission
 from app.models.problem import Problem
 from app.models.user import User
-from app.models.signal import ProctoringSignal
+from app.models.signal import ProctoringSignal, RiskLevel
+from app.models.session import InterviewSession, SessionStatus
 from app.schemas.analytics import (
     SnapshotCreate, BehavioralTimeline, EngagementPoint, SimilarityReportOut,
 )
 from app.services.similarity import compare_against_corpus
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_session_for_user, require_interviewer
 from app.websocket.manager import manager
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
@@ -35,6 +36,7 @@ async def save_snapshot(
     current_user: User = Depends(get_current_user),
 ):
     """Called from the frontend every 30s or on significant code change."""
+    await get_session_for_user(body.session_id, db, current_user)
     # Get previous snapshot to compute delta
     prev_result = await db.execute(
         select(CodeSnapshot)
@@ -154,8 +156,9 @@ async def _run_similarity_check(session_id, problem_id, language, source_code):
 async def get_behavioral_timeline(
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
+    await get_session_for_user(session_id, db, current_user)
     # Engagement from snapshots
     snaps_result = await db.execute(
         select(CodeSnapshot)
@@ -215,8 +218,9 @@ async def get_behavioral_timeline(
 async def get_similarity_reports(
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
+    await get_session_for_user(session_id, db, current_user)
     result = await db.execute(
         select(SimilarityReport)
         .where(SimilarityReport.session_id == session_id)
@@ -232,9 +236,10 @@ async def run_similarity_now(
     language: str,
     source_code: str,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """On-demand similarity scan (triggered by interviewer)."""
+    await get_session_for_user(session_id, db, current_user)
     prob = (await db.execute(
         select(Problem).where(Problem.id == problem_id)
     )).scalar_one_or_none()
@@ -278,9 +283,10 @@ async def run_similarity_now(
 async def get_session_score(
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Return computed engagement/focus/risk/integrity scores for a session."""
+    await get_session_for_user(session_id, db, current_user)
     from app.services.analytics import compute_scores
 
     # Snapshots
@@ -305,7 +311,7 @@ async def get_session_score(
 
     result = compute_scores(
         snapshots=[{"elapsed_seconds": s.elapsed_seconds, "keystroke_rate": s.keystroke_rate, "char_count": s.char_count} for s in snaps],
-        signals=[{"risk_level": str(s.risk_level), "signal_type": str(s.signal_type)} for s in sigs],
+        signals=[{"risk_level": s.risk_level.value, "signal_type": s.signal_type.value} for s in sigs],
         similarity_scores=sim_scores,
     )
 
@@ -318,4 +324,73 @@ async def get_session_score(
         "summary":          result.summary,
         "signal_count":     len(sigs),
         "snapshot_count":   len(snaps),
+    }
+
+
+# ── Interviewer-wide overview (dashboard + insights) ──────────────────────────
+
+PASS_SCORE = 70
+
+
+@router.get("/overview")
+async def get_overview(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_interviewer),
+):
+    """Aggregates across all of the current interviewer's sessions."""
+    sessions = (await db.execute(
+        select(InterviewSession).where(InterviewSession.interviewer_id == current_user.id)
+    )).scalars().all()
+    ids = [s.id for s in sessions]
+
+    # Signal counts per session per risk level
+    per_session: dict[str, dict[str, int]] = {str(i): {"high": 0, "medium": 0, "low": 0} for i in ids}
+    if ids:
+        rows = (await db.execute(
+            select(ProctoringSignal.session_id, ProctoringSignal.risk_level, func.count())
+            .where(ProctoringSignal.session_id.in_(ids))
+            .group_by(ProctoringSignal.session_id, ProctoringSignal.risk_level)
+        )).all()
+        for sid, risk, count in rows:
+            bucket = "high" if risk in (RiskLevel.high, RiskLevel.critical) else risk.value
+            if bucket in per_session[str(sid)]:
+                per_session[str(sid)][bucket] += count
+
+    scored = [s.final_score for s in sessions if s.final_score is not None]
+    flagged_ids = {sid for sid, c in per_session.items() if c["high"] > 0}
+
+    # Last 6 calendar months, oldest first
+    now = datetime.now(timezone.utc)
+    months = []
+    y, m = now.year, now.month
+    for _ in range(6):
+        months.append((y, m))
+        y, m = (y - 1, 12) if m == 1 else (y, m - 1)
+    months.reverse()
+    monthly = []
+    for y, m in months:
+        in_month = [s for s in sessions if s.created_at.year == y and s.created_at.month == m]
+        monthly.append({
+            "month": datetime(y, m, 1).strftime("%b"),
+            "interviews": len(in_month),
+            "passed": sum(1 for s in in_month if (s.final_score or 0) >= PASS_SCORE),
+            "flagged": sum(1 for s in in_month if str(s.id) in flagged_ids),
+        })
+
+    buckets = [(0, 20), (21, 40), (41, 60), (61, 80), (81, 100)]
+    distribution = [
+        {"range": f"{lo}-{hi}", "count": sum(1 for sc in scored if lo <= sc <= hi)}
+        for lo, hi in buckets
+    ]
+
+    return {
+        "total_interviews": len(sessions),
+        "completed": sum(1 for s in sessions if s.status == SessionStatus.completed),
+        "avg_score": round(sum(scored) / len(scored), 1) if scored else None,
+        "pass_rate": round(100 * sum(1 for sc in scored if sc >= PASS_SCORE) / len(scored)) if scored else None,
+        "high_risk_signals": sum(c["high"] for c in per_session.values()),
+        "flagged_sessions": len(flagged_ids),
+        "per_session": per_session,
+        "monthly": monthly,
+        "score_distribution": distribution,
     }

@@ -1,54 +1,57 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import Logo from '../components/Logo'
 import { useAuth } from '../contexts/AuthContext'
+import { BASE_URL } from '../services/api'
 
+/**
+ * OAuth lands here twice:
+ *   1. From Google/GitHub with ?code=&state=<provider> — hand the code to the
+ *      backend, which exchanges it and redirects back here…
+ *   2. …with ?token=&user_id=&full_name=&role= — store the session.
+ */
 export default function OAuthCallback() {
   const navigate = useNavigate()
   const { login } = useAuth()
   const [searchParams] = useSearchParams()
   const [error, setError] = useState('')
+  const handled = useRef(false)
 
   useEffect(() => {
-    const handleCallback = async () => {
-      // Check for error from backend
-      const errorParam = searchParams.get('error')
-      if (errorParam) {
-        setError(`Authentication failed: ${errorParam}`)
-        setTimeout(() => navigate('/login'), 3000)
-        return
-      }
+    if (handled.current) return
+    handled.current = true
 
-      // Get token from URL (sent by backend after OAuth)
-      const token = searchParams.get('token')
-      const userId = searchParams.get('user_id')
-      const fullName = searchParams.get('full_name')
-      const role = searchParams.get('role')
-
-      if (!token) {
-        setError('No authentication token received')
-        setTimeout(() => navigate('/login'), 3000)
-        return
-      }
-
-      try {
-        // Use AuthContext login function
-        login(token, { 
-          id: userId, 
-          name: fullName, 
-          role: role 
-        })
-        
-        // Redirect to dashboard
-        navigate('/dashboard', { replace: true })
-      } catch (err) {
-        console.error('Error storing auth data:', err)
-        setError('Authentication failed. Please try again.')
-        setTimeout(() => navigate('/login'), 3000)
-      }
+    const fail = (message) => {
+      setError(message)
+      setTimeout(() => navigate('/login', { replace: true }), 3000)
     }
 
-    handleCallback()
+    const errorParam = searchParams.get('error')
+    if (errorParam) {
+      fail(`Authentication failed: ${searchParams.get('error_description') || errorParam}`)
+      return
+    }
+
+    const code = searchParams.get('code')
+    const state = searchParams.get('state')
+    if (code && state) {
+      const params = new URLSearchParams({ code, state })
+      window.location.replace(`${BASE_URL}/api/auth/oauth/callback?${params}`)
+      return
+    }
+
+    const token = searchParams.get('token')
+    if (!token) {
+      fail('No authentication token received')
+      return
+    }
+
+    login(token, {
+      id: searchParams.get('user_id'),
+      full_name: searchParams.get('full_name'),
+      role: searchParams.get('role'),
+    })
+    navigate('/dashboard', { replace: true })
   }, [searchParams, navigate, login])
 
   return (

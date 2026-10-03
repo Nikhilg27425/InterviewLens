@@ -15,23 +15,16 @@ import InterviewDetails from './pages/InterviewDetails'
 import LiveSession from './pages/LiveSession'
 import CodeAnalysis from './pages/CodeAnalysis'
 import Insights from './pages/Insights'
+import Problems from './pages/Problems'
+import ProblemEditor from './pages/ProblemEditor'
+import Settings from './pages/Settings'
+import Help from './pages/Help'
 
 // ── Candidate pages ────────────────────────────────────────────────────────
 import CandidateLogin from './pages/candidate/CandidateLogin'
 import CandidateWaitingRoom from './pages/candidate/CandidateWaitingRoom'
 import CandidateInterviewPage from './pages/candidate/CandidateInterviewPage'
 import CandidateSubmitted from './pages/candidate/CandidateSubmitted'
-
-function ComingSoon({ title }) {
-  return (
-    <div className="flex items-center justify-center h-64">
-      <div className="text-center">
-        <p className="text-2xl font-bold text-gray-300 mb-2">{title}</p>
-        <p className="text-gray-400 text-sm">Coming soon</p>
-      </div>
-    </div>
-  )
-}
 
 export default function App() {
   return (
@@ -62,8 +55,11 @@ export default function App() {
           <Route path="/interviews/:id" element={<InterviewDetails />} />
           <Route path="/code-analysis" element={<CodeAnalysis />} />
           <Route path="/insights" element={<Insights />} />
-          <Route path="/settings" element={<ComingSoon title="Settings" />} />
-          <Route path="/help" element={<ComingSoon title="Help Center" />} />
+          <Route path="/problems" element={<Problems />} />
+          <Route path="/problems/new" element={<ProblemEditor />} />
+          <Route path="/problems/:id" element={<ProblemEditor />} />
+          <Route path="/settings" element={<Settings />} />
+          <Route path="/help" element={<Help />} />
         </Route>
 
         {/* ── Fallback ── */}

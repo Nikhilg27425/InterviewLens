@@ -1,49 +1,62 @@
-import React, { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { Mail, Lock, Eye, EyeOff, Info } from 'lucide-react'
+import React, { useState, useEffect } from 'react'
+import { Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import { Mail, Lock, Eye, EyeOff, Info, User, Building2 } from 'lucide-react'
 import Logo from '../components/Logo'
 import { authAPI } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
 
+function apiError(err, fallback) {
+  const detail = err?.response?.data?.detail
+  if (Array.isArray(detail)) return detail.map((d) => d.msg?.replace(/^Value error, /, '')).join('. ')
+  if (detail) return detail
+  if (!err?.response) return 'Cannot reach the server. Make sure the backend is running on port 8000.'
+  return fallback
+}
+
 export default function LoginPage() {
   const navigate = useNavigate()
-  const { login } = useAuth()
+  const location = useLocation()
+  const [searchParams] = useSearchParams()
+  const { login, isAuthenticated, loading: authLoading } = useAuth()
+  const [mode, setMode] = useState('signin') // 'signin' | 'register'
   const [showPassword, setShowPassword] = useState(false)
-  const [remember, setRemember] = useState(false)
-  const [form, setForm] = useState({ email: '', password: '' })
-  const [error, setError] = useState('')
+  const [form, setForm] = useState({ email: '', password: '', full_name: '', company: '' })
+
+  const [error, setError] = useState(searchParams.get('error') || '')
   const [loading, setLoading] = useState(false)
 
-  const handleSubmit = (e) => {
+  const isRegister = mode === 'register'
+  const redirectTo = location.state?.from?.pathname || '/dashboard'
+
+  useEffect(() => { setError(searchParams.get('error') || '') }, [searchParams])
+
+  if (!authLoading && isAuthenticated) return <Navigate to={redirectTo} replace />
+
+  const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
     setLoading(true)
-    
-    authAPI.loginInterviewer(form.email, form.password)
-      .then(({ data }) => {
-        // Use the AuthContext login function
-        login(data.access_token, { 
-          id: data.user_id, 
-          name: data.full_name, 
-          role: data.role 
+    try {
+      if (isRegister) {
+        await authAPI.registerInterviewer({
+          email: form.email,
+          password: form.password,
+          full_name: form.full_name,
+          company: form.company || null,
         })
-        setLoading(false)
-        navigate('/dashboard', { replace: true })
-      })
-      .catch((err) => {
-        setLoading(false)
-        const errorMessage = err.response?.data?.detail || 'Invalid credentials. Please try again.'
-        setError(errorMessage)
-        console.error('Login error:', err)
-      })
+      }
+      const { data } = await authAPI.loginInterviewer(form.email, form.password)
+      login(data.access_token, { id: data.user_id, full_name: data.full_name, role: data.role })
+      navigate(redirectTo, { replace: true })
+    } catch (err) {
+      setError(apiError(err, isRegister ? 'Could not create account.' : 'Sign in failed.'))
+      setLoading(false)
+    }
   }
 
-  const handleGoogleLogin = () => {
-    window.location.href = authAPI.googleLogin()
-  }
-
-  const handleGithubLogin = () => {
-    window.location.href = authAPI.githubLogin()
+  const switchMode = () => {
+    setMode(isRegister ? 'signin' : 'register')
+    setError('')
   }
 
   return (
@@ -122,16 +135,20 @@ export default function LoginPage() {
             <Logo size="lg" />
           </div>
 
-          <h1 className="text-3xl font-bold text-gray-900 mb-1">Sign In</h1>
+          <h1 className="text-3xl font-bold text-gray-900 mb-1">
+            {isRegister ? 'Create Account' : 'Sign In'}
+          </h1>
           <p className="text-gray-500 text-sm mb-8">
-            Welcome back. Enter your credentials to access your dashboard.
+            {isRegister
+              ? 'Set up an interviewer account to start running assessments.'
+              : 'Welcome back. Enter your credentials to access your dashboard.'}
           </p>
 
           {/* Social login */}
           <div className="grid grid-cols-2 gap-3 mb-6">
-            <button 
+            <button
               type="button"
-              onClick={handleGoogleLogin}
+              onClick={() => { window.location.href = authAPI.googleLogin() }}
               className="flex items-center justify-center gap-2.5 border border-gray-200 rounded-xl py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-all"
             >
               {/* Google */}
@@ -143,9 +160,9 @@ export default function LoginPage() {
               </svg>
               Google
             </button>
-            <button 
+            <button
               type="button"
-              onClick={handleGithubLogin}
+              onClick={() => { window.location.href = authAPI.githubLogin() }}
               className="flex items-center justify-center gap-2.5 border border-gray-200 rounded-xl py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-all"
             >
               {/* GitHub */}
@@ -162,14 +179,44 @@ export default function LoginPage() {
             <div className="flex-1 h-px bg-gray-200" />
           </div>
 
-          {error && (
-            <div className="flex items-start gap-2.5 bg-red-50 border border-red-200 rounded-xl p-3.5 mb-4">
-              <Info size={15} className="text-red-500 flex-shrink-0 mt-0.5" />
-              <p className="text-sm text-red-600">{error}</p>
-            </div>
-          )}
-
           <form onSubmit={handleSubmit} className="space-y-4">
+            {error && (
+              <div className="flex items-start gap-2.5 bg-red-50 border border-red-200 rounded-xl p-3.5">
+                <span className="text-red-500 text-sm mt-0.5">⚠</span>
+                <p className="text-sm text-red-600">{error}</p>
+              </div>
+            )}
+            {isRegister && (
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Full Name</label>
+                  <div className="relative">
+                    <User className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                    <input
+                      type="text"
+                      placeholder="Jane Doe"
+                      value={form.full_name}
+                      onChange={(e) => setForm({ ...form, full_name: e.target.value })}
+                      className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white placeholder-gray-400"
+                      required
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Company</label>
+                  <div className="relative">
+                    <Building2 className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                    <input
+                      type="text"
+                      placeholder="Optional"
+                      value={form.company}
+                      onChange={(e) => setForm({ ...form, company: e.target.value })}
+                      className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white placeholder-gray-400"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">
                 Corporate Email
@@ -190,9 +237,7 @@ export default function LoginPage() {
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label className="block text-sm font-medium text-gray-700">Password</label>
-                <a href="#" className="text-sm text-blue-600 font-medium hover:underline">
-                  Forgot password?
-                </a>
+                {isRegister && <span className="text-xs text-gray-400">At least 8 characters</span>}
               </div>
               <div className="relative">
                 <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
@@ -202,6 +247,7 @@ export default function LoginPage() {
                   value={form.password}
                   onChange={(e) => setForm({ ...form, password: e.target.value })}
                   className="w-full pl-10 pr-11 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                  minLength={isRegister ? 8 : undefined}
                   required
                 />
                 <button
@@ -214,42 +260,22 @@ export default function LoginPage() {
               </div>
             </div>
 
-            <label className="flex items-center gap-2.5 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={remember}
-                onChange={(e) => setRemember(e.target.checked)}
-                className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-              />
-              <span className="text-sm text-gray-600">Keep me signed in for 30 days</span>
-            </label>
-
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-blue-600 text-white font-semibold py-3.5 rounded-xl hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 text-sm mt-2 disabled:opacity-60 disabled:cursor-not-allowed"
+              className="w-full bg-blue-600 text-white font-semibold py-3.5 rounded-xl hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 text-sm mt-2 disabled:opacity-60"
             >
-              {loading ? (
-                <>
-                  <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-                  </svg>
-                  Signing in...
-                </>
-              ) : (
-                <>
-                  Sign In to Dashboard →
-                </>
-              )}
+              {loading
+                ? (isRegister ? 'Creating account…' : 'Signing in…')
+                : (isRegister ? 'Create Account →' : 'Sign In to Dashboard →')}
             </button>
           </form>
 
           <p className="text-center text-sm text-gray-500 mt-6">
-            New to InterviewLens?{' '}
-            <a href="#" className="text-blue-600 font-semibold hover:underline">
-              Create an organizational account
-            </a>
+            {isRegister ? 'Already have an account?' : 'New to InterviewLens?'}{' '}
+            <button type="button" onClick={switchMode} className="text-blue-600 font-semibold hover:underline">
+              {isRegister ? 'Sign in' : 'Create an organizational account'}
+            </button>
           </p>
 
           {/* Compliance notice */}

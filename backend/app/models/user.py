@@ -41,5 +41,9 @@ class User(Base):
         "InterviewSession", back_populates="candidate", foreign_keys="InterviewSession.candidate_id"
     )
 
+    @property
+    def has_password(self) -> bool:
+        return self.hashed_password is not None
+
     def __repr__(self) -> str:
         return f"<User {self.email} ({self.role})>"

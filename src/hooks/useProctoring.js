@@ -28,9 +28,13 @@ export function useProctoring({ sessionId, elapsedSeconds, ws = null, enabled = 
   const [signals, setSignals] = useState([])
   const bufferRef = useRef([])
   const flushTimer = useRef(null)
+  // Read via ref so `push` (and every listener) isn't re-created each second
+  const elapsedRef = useRef(elapsedSeconds)
+  elapsedRef.current = elapsedSeconds
 
   const push = useCallback((type, detail = null) => {
     if (!enabled || !sessionId) return
+    const elapsedSeconds = elapsedRef.current
 
     const signal = {
       session_id:      sessionId,
@@ -51,7 +55,7 @@ export function useProctoring({ sessionId, elapsedSeconds, ws = null, enabled = 
         elapsed_seconds: elapsedSeconds,
       }))
     }
-  }, [sessionId, elapsedSeconds, ws, enabled])
+  }, [sessionId, ws, enabled])
 
   // ── Flush buffer to REST API every 5s ──
   const flush = useCallback(async () => {
