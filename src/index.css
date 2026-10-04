@@ -6,6 +6,11 @@
   * {
     box-sizing: border-box;
   }
+  
+  html {
+    scroll-behavior: smooth;
+  }
+  
   body {
     font-family: 'Inter', system-ui, sans-serif;
     @apply text-gray-900 bg-white;

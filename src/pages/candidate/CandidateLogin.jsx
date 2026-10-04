@@ -136,9 +136,6 @@ export default function CandidateLogin() {
         {/* Footer */}
         <div className="relative z-10 flex items-center gap-5 text-cyan-300/60 text-xs">
           <span>© 2026 InterviewLens Inc.</span>
-          <a href="#" className="hover:text-white transition-colors">Privacy</a>
-          <a href="#" className="hover:text-white transition-colors">Terms</a>
-          <a href="#" className="hover:text-white transition-colors">Support</a>
         </div>
       </div>
 
@@ -192,9 +189,6 @@ export default function CandidateLogin() {
                 <label className="block text-sm font-medium text-gray-700">
                   Interview Access Token
                 </label>
-                <a href="#" className="text-xs text-emerald-600 font-medium hover:underline">
-                  Lost your token?
-                </a>
               </div>
               <div className="relative">
                 <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" size={16} />

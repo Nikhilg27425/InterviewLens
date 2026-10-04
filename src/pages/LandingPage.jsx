@@ -4,8 +4,24 @@ import { ArrowRight, Check, Scale, Shield, Eye, Brain, Users, Code2, Video, Aler
 import Logo from '../components/Logo'
 
 function LandingNavbar() {
+  const handleSmoothScroll = (e, href) => {
+    e.preventDefault()
+    const targetId = href.replace('#', '')
+    const element = document.getElementById(targetId)
+    if (element) {
+      const offset = 80 // Height of fixed navbar + some padding
+      const elementPosition = element.getBoundingClientRect().top
+      const offsetPosition = elementPosition + window.pageYOffset - offset
+
+      window.scrollTo({
+        top: offsetPosition,
+        behavior: 'smooth'
+      })
+    }
+  }
+
   return (
-    <nav className="fixed top-0 left-0 right-0 z-50 bg-white border-b border-gray-100">
+    <nav className="fixed top-0 left-0 right-0 z-50 bg-white border-b border-gray-100 backdrop-blur-sm bg-white/95">
       <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
         <Logo size="md" />
         <div className="hidden md:flex items-center gap-8">
@@ -15,7 +31,12 @@ function LandingNavbar() {
             { label: 'Candidate Portal', href: '#candidate-portal' },
             { label: 'Interviewer Portal', href: '#interviewer-portal' }
           ].map((item) => (
-            <a key={item.label} href={item.href} className="text-sm text-gray-600 hover:text-gray-900 font-medium transition-colors">
+            <a 
+              key={item.label} 
+              href={item.href} 
+              onClick={(e) => handleSmoothScroll(e, item.href)}
+              className="text-sm text-gray-600 hover:text-gray-900 font-medium transition-all duration-300 hover:scale-105"
+            >
               {item.label}
             </a>
           ))}
@@ -23,13 +44,13 @@ function LandingNavbar() {
         <div className="flex items-center gap-3">
           <Link
             to="/candidate/login"
-            className="text-sm font-semibold text-emerald-700 hover:text-emerald-900 border border-emerald-200 bg-emerald-50 px-4 py-2 rounded-lg hover:bg-emerald-100 transition-colors"
+            className="text-sm font-semibold text-emerald-700 hover:text-emerald-900 border border-emerald-200 bg-emerald-50 px-4 py-2 rounded-lg hover:bg-emerald-100 transition-all duration-300 hover:scale-105 hover:shadow-md"
           >
             Candidate Login
           </Link>
           <Link
             to="/login"
-            className="bg-blue-600 text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+            className="bg-blue-600 text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-blue-700 transition-all duration-300 hover:scale-105 hover:shadow-lg"
           >
             Interviewer Login
           </Link>
@@ -55,9 +76,9 @@ function HeroSection() {
             <div className="flex items-center gap-4">
               <Link
                 to="/login"
-                className="flex items-center gap-2 bg-blue-600 text-white font-semibold px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors shadow-md"
+                className="flex items-center gap-2 bg-blue-600 text-white font-semibold px-6 py-3 rounded-lg hover:bg-blue-700 transition-all duration-300 hover:scale-105 hover:shadow-xl transform"
               >
-                Interviewer Login <ArrowRight size={16} />
+                Interviewer Login <ArrowRight size={16} className="transition-transform duration-300 group-hover:translate-x-1" />
               </Link>
             </div>
           </div>
@@ -128,8 +149,8 @@ function ProblemSection() {
         
         <div className="grid md:grid-cols-2 gap-8 max-w-5xl mx-auto">
           {/* Bias & Inconsistency */}
-          <div className="bg-gradient-to-br from-red-50 to-orange-50 rounded-2xl p-8 border border-red-100">
-            <div className="w-14 h-14 bg-red-100 rounded-xl flex items-center justify-center mb-6">
+          <div className="bg-gradient-to-br from-red-50 to-orange-50 rounded-2xl p-8 border border-red-100 transition-all duration-300 hover:shadow-xl hover:-translate-y-2 group">
+            <div className="w-14 h-14 bg-red-100 rounded-xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
               <Scale size={28} className="text-red-600" />
             </div>
             <h3 className="text-2xl font-bold text-gray-900 mb-4">Bias & Inconsistency</h3>
@@ -153,8 +174,8 @@ function ProblemSection() {
           </div>
 
           {/* Integrity & Cheating */}
-          <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl p-8 border border-blue-100">
-            <div className="w-14 h-14 bg-blue-100 rounded-xl flex items-center justify-center mb-6">
+          <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl p-8 border border-blue-100 transition-all duration-300 hover:shadow-xl hover:-translate-y-2 group">
+            <div className="w-14 h-14 bg-blue-100 rounded-xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
               <Shield size={28} className="text-blue-600" />
             </div>
             <h3 className="text-2xl font-bold text-gray-900 mb-4">Integrity & Cheating</h3>
@@ -220,32 +241,14 @@ function SolutionSection() {
         
         <div className="grid md:grid-cols-3 gap-8">
           {solutions.map(({ icon: Icon, title, desc }) => (
-            <div key={title} className="bg-white rounded-2xl p-8 border border-gray-100 hover:border-blue-200 hover:shadow-lg transition-all group">
-              <div className="w-14 h-14 bg-blue-50 rounded-xl flex items-center justify-center mb-6 group-hover:bg-blue-100 transition-colors">
-                <Icon size={28} className="text-blue-600" />
+            <div key={title} className="bg-white rounded-2xl p-8 border border-gray-100 hover:border-blue-200 hover:shadow-lg transition-all duration-300 hover:-translate-y-1 group">
+              <div className="w-14 h-14 bg-blue-50 rounded-xl flex items-center justify-center mb-6 group-hover:bg-blue-100 transition-all duration-300 group-hover:scale-110">
+                <Icon size={28} className="text-blue-600 transition-transform duration-300 group-hover:scale-110" />
               </div>
               <h3 className="text-xl font-bold text-gray-900 mb-3">{title}</h3>
               <p className="text-gray-600 leading-relaxed">{desc}</p>
             </div>
           ))}
-        </div>
-
-        {/* Key Differentiators */}
-        <div className="mt-16 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl p-8 text-white">
-          <div className="grid md:grid-cols-3 gap-8 text-center">
-            <div>
-              <p className="text-4xl font-extrabold mb-2">99.8%</p>
-              <p className="text-blue-100 text-sm">Plagiarism detection accuracy across 20+ languages</p>
-            </div>
-            <div>
-              <p className="text-4xl font-extrabold mb-2">&lt;2s</p>
-              <p className="text-blue-100 text-sm">Average code similarity analysis time</p>
-            </div>
-            <div>
-              <p className="text-4xl font-extrabold mb-2">Zero</p>
-              <p className="text-blue-100 text-sm">Latency real-time code synchronization</p>
-            </div>
-          </div>
         </div>
       </div>
     </section>
@@ -302,9 +305,9 @@ function CandidatePortalSection() {
 
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
           {features.map(({ icon: Icon, title, desc }) => (
-            <div key={title} className="bg-white rounded-xl p-6 border border-gray-100 hover:border-emerald-200 hover:shadow-md transition-all">
-              <div className="w-12 h-12 bg-emerald-50 rounded-lg flex items-center justify-center mb-4">
-                <Icon size={24} className="text-emerald-600" />
+            <div key={title} className="bg-white rounded-xl p-6 border border-gray-100 hover:border-emerald-200 hover:shadow-md transition-all duration-300 hover:-translate-y-1 group">
+              <div className="w-12 h-12 bg-emerald-50 rounded-lg flex items-center justify-center mb-4 group-hover:bg-emerald-100 transition-all duration-300 group-hover:scale-110">
+                <Icon size={24} className="text-emerald-600 transition-transform duration-300 group-hover:scale-110" />
               </div>
               <h3 className="text-lg font-semibold text-gray-900 mb-2">{title}</h3>
               <p className="text-sm text-gray-600 leading-relaxed">{desc}</p>
@@ -396,9 +399,9 @@ function InterviewerPortalSection() {
 
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
           {features.map(({ icon: Icon, title, desc }) => (
-            <div key={title} className="bg-gray-800 rounded-xl p-6 border border-gray-700 hover:border-blue-500 hover:bg-gray-800/80 transition-all">
-              <div className="w-12 h-12 bg-blue-500/20 rounded-lg flex items-center justify-center mb-4">
-                <Icon size={24} className="text-blue-400" />
+            <div key={title} className="bg-gray-800 rounded-xl p-6 border border-gray-700 hover:border-blue-500 hover:bg-gray-800/80 transition-all duration-300 hover:-translate-y-1 group">
+              <div className="w-12 h-12 bg-blue-500/20 rounded-lg flex items-center justify-center mb-4 group-hover:bg-blue-500/30 transition-all duration-300 group-hover:scale-110">
+                <Icon size={24} className="text-blue-400 transition-transform duration-300 group-hover:scale-110" />
               </div>
               <h3 className="text-lg font-semibold mb-2">{title}</h3>
               <p className="text-sm text-gray-400 leading-relaxed">{desc}</p>
