@@ -18,6 +18,9 @@ python-multipart==0.0.32
 # HTTP client (Judge0 proxy)
 httpx==0.28.1
 
+# Payment processing
+stripe==11.4.0
+
 # WebSockets
 websockets==17.1
 
