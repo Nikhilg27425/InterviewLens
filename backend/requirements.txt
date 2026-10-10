@@ -19,6 +19,7 @@ python-multipart==0.0.32
 httpx==0.28.1
 
 # Payment processing
+setuptools>=65.0.0          # Required by razorpay (provides pkg_resources)
 razorpay==1.4.2
 
 # WebSockets
