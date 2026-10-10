@@ -112,11 +112,11 @@ function FAQ() {
     },
     {
       question: "What payment methods do you accept?",
-      answer: "We accept all major credit and debit cards through Stripe, including Visa, Mastercard, American Express, and UPI payments."
+      answer: "We accept all major credit and debit cards through Razorpay, including Visa, Mastercard, American Express, UPI, net banking, and digital wallets."
     },
     {
       question: "Is my payment information secure?",
-      answer: "Absolutely. We use Stripe for payment processing, which is PCI-compliant and handles millions of transactions securely every day."
+      answer: "Absolutely. We use Razorpay for payment processing, which is PCI-DSS compliant and trusted by millions of businesses across India for secure transactions."
     }
   ]
 
@@ -141,14 +141,27 @@ function FAQ() {
 }
 
 export default function Pricing() {
-  const handleCTAClick = (tier) => {
+  const handleCTAClick = async (tier) => {
     if (tier === 'free') {
       // Redirect to signup/login
       window.location.href = '/login'
     } else if (tier === 'professional' || tier === 'enterprise') {
-      // TODO: Redirect to Stripe checkout
-      console.log(`Initiating checkout for ${tier} plan`)
-      alert(`Checkout for ${tier} plan will be implemented with Stripe integration`)
+      // Check if user is authenticated
+      const token = localStorage.getItem('token')
+      if (!token) {
+        // Redirect to login with return URL
+        window.location.href = `/login?redirect=/pricing&upgrade=${tier}`
+        return
+      }
+      
+      // Import checkout service dynamically
+      try {
+        const { initiateCheckout } = await import('../services/checkout')
+        await initiateCheckout(tier)
+      } catch (error) {
+        console.error('Checkout error:', error)
+        alert(error.message || 'Failed to start checkout. Please try again.')
+      }
     }
   }
 

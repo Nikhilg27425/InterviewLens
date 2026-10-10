@@ -353,7 +353,7 @@ export default function Settings() {
                             <p className="text-sm font-semibold text-gray-900">
                               {new Date(invoice.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}
                             </p>
-                            <p className="text-xs text-gray-500">Invoice #{invoice.stripe_invoice_id?.slice(-8) || invoice.id}</p>
+                            <p className="text-xs text-gray-500">Invoice #{invoice.razorpay_invoice_id?.slice(-8) || invoice.id}</p>
                           </div>
                         </div>
                         <div className="flex items-center gap-4">

@@ -227,7 +227,7 @@ export default function UpgradeModal({
             <div className="grid md:grid-cols-3 gap-4 text-center text-sm text-gray-600">
               <div>
                 <div className="font-semibold text-gray-900 mb-1">🔒 Secure Payment</div>
-                <div>Powered by Stripe</div>
+                <div>Powered by Razorpay</div>
               </div>
               <div>
                 <div className="font-semibold text-gray-900 mb-1">💳 Cancel Anytime</div>
