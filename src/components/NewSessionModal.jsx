@@ -4,7 +4,9 @@ import {
   X, Loader, Copy, Check, Play, AlertTriangle, Search, Mail, CalendarClock, BookOpen, CheckCircle,
 } from 'lucide-react'
 import { problemsAPI, sessionsAPI, apiErrorMessage } from '../services/api'
+import { getUsageStats } from '../services/checkout'
 import InviteControls from './InviteControls'
+import UpgradeModal from './UpgradeModal'
 
 const DIFF = {
   Easy:   'bg-emerald-100 text-emerald-700',
@@ -54,11 +56,28 @@ export default function NewSessionModal({ onClose, onCreated }) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [created, setCreated] = useState(null)
+  
+  // Subscription limits
+  const [usage, setUsage] = useState(null)
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false)
+  const [limitReached, setLimitReached] = useState(false)
 
   useEffect(() => {
     problemsAPI.list()
       .then(({ data }) => setProblems(data))
       .catch(() => { setProblems([]); setError('Could not load the problem bank.') })
+    
+    // Check subscription usage
+    getUsageStats()
+      .then((data) => {
+        setUsage(data)
+        // Check if limit reached
+        if (data.interviews_limit > 0 && data.interviews_used >= data.interviews_limit) {
+          setLimitReached(true)
+          setError(`You've reached your monthly limit of ${data.interviews_limit} interviews. Upgrade to create more.`)
+        }
+      })
+      .catch((err) => console.error('Failed to load usage stats:', err))
   }, [])
 
   const set = (key) => (e) => setForm({ ...form, [key]: e.target.type === 'checkbox' ? e.target.checked : e.target.value })
@@ -83,6 +102,13 @@ export default function NewSessionModal({ onClose, onCreated }) {
       setError('Pick at least one problem.')
       return
     }
+    
+    // Check limit before submitting
+    if (limitReached) {
+      setShowUpgradeModal(true)
+      return
+    }
+    
     setSaving(true)
     setError('')
     try {
@@ -99,7 +125,13 @@ export default function NewSessionModal({ onClose, onCreated }) {
       setCreated(data)
       onCreated?.(data)
     } catch (err) {
-      setError(apiErrorMessage(err, 'Could not create the session.'))
+      const errMsg = apiErrorMessage(err, 'Could not create the session.')
+      // Check if it's a subscription limit error
+      if (err.response?.status === 403 && err.response?.data?.detail?.includes('limit')) {
+        setLimitReached(true)
+        setShowUpgradeModal(true)
+      }
+      setError(errMsg)
     } finally {
       setSaving(false)
     }
@@ -108,7 +140,8 @@ export default function NewSessionModal({ onClose, onCreated }) {
   const input = 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
 
   return (
-    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <>
+      <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] flex flex-col">
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
           <div>
@@ -284,7 +317,18 @@ export default function NewSessionModal({ onClose, onCreated }) {
               {error && (
                 <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-lg p-3">
                   <AlertTriangle size={14} className="text-red-500 flex-shrink-0 mt-0.5" />
-                  <p className="text-xs text-red-600">{error}</p>
+                  <div className="flex-1">
+                    <p className="text-xs text-red-600">{error}</p>
+                    {limitReached && (
+                      <button
+                        type="button"
+                        onClick={() => setShowUpgradeModal(true)}
+                        className="text-xs font-semibold text-red-700 hover:underline mt-1"
+                      >
+                        Upgrade Now →
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -292,17 +336,28 @@ export default function NewSessionModal({ onClose, onCreated }) {
             <div className="px-6 py-4 border-t border-gray-100 flex-shrink-0">
               <button
                 type="submit"
-                disabled={saving}
-                className="w-full bg-blue-600 text-white font-semibold py-2.5 rounded-xl hover:bg-blue-700 disabled:opacity-60 text-sm flex items-center justify-center gap-2"
+                disabled={saving || limitReached}
+                className="w-full bg-blue-600 text-white font-semibold py-2.5 rounded-xl hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed text-sm flex items-center justify-center gap-2"
               >
                 {saving
                   ? <><Loader size={14} className="animate-spin" /> Creating…</>
+                  : limitReached
+                  ? 'Limit Reached - Upgrade Required'
                   : form.send_invite && form.candidate_email ? 'Create session & send invite' : 'Create session'}
               </button>
             </div>
           </form>
         )}
       </div>
-    </div>
+      
+      {/* Upgrade Modal */}
+      <UpgradeModal
+        isOpen={showUpgradeModal}
+        onClose={() => setShowUpgradeModal(false)}
+        currentTier={usage?.tier || 'free'}
+        reason="You've reached your monthly interview limit"
+        feature="unlimited interviews"
+      />
+    </>
   )
 }
