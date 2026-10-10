@@ -1,7 +1,7 @@
 """add subscriptions and usage tracking
 
-Revision ID: 0005_add_subscriptions
-Revises: 0004_problem_bank_and_invites
+Revision ID: 0005
+Revises: 0004
 Create Date: 2026-10-10 12:00:00.000000
 
 """
@@ -10,26 +10,28 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision = '0005_add_subscriptions'
-down_revision = '0004_problem_bank_and_invites'
+revision = '0005'
+down_revision = '0004'
 branch_labels = None
 depends_on = None
 
 
 def upgrade() -> None:
-    # Create subscription status enum
+    # Create subscription status enum (with checkfirst)
     subscription_status_enum = postgresql.ENUM(
         'active', 'canceled', 'past_due', 'trialing',
-        name='subscription_status'
+        name='subscription_status',
+        create_type=False
     )
-    subscription_status_enum.create(op.get_bind())
+    subscription_status_enum.create(op.get_bind(), checkfirst=True)
     
-    # Create subscription tier enum
+    # Create subscription tier enum (with checkfirst)
     subscription_tier_enum = postgresql.ENUM(
         'free', 'professional', 'enterprise',
-        name='subscription_tier'
+        name='subscription_tier',
+        create_type=False
     )
-    subscription_tier_enum.create(op.get_bind())
+    subscription_tier_enum.create(op.get_bind(), checkfirst=True)
     
     # Create subscriptions table
     op.create_table(
