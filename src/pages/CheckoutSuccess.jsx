@@ -11,7 +11,7 @@ export default function CheckoutSuccess() {
   const [subscription, setSubscription] = useState(null)
 
   useEffect(() => {
-    // Give Stripe webhook a moment to process
+    // Give Razorpay webhook a moment to process
     const timer = setTimeout(async () => {
       try {
         const subData = await getSubscriptionStatus()
