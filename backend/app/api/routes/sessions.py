@@ -14,7 +14,7 @@ from app.schemas.session import (
     SessionCreate, SessionUpdate, SessionOut, SessionSummary, InviteStatus, InvitePreview,
 )
 from app.services import email as mailer
-from app.api.deps import get_current_user, require_interviewer
+from app.api.deps import get_current_user, require_interviewer, check_interview_limit
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -80,6 +80,7 @@ async def create_session(
     body: SessionCreate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_interviewer),
+    subscription = Depends(check_interview_limit),  # Check limits before creating
 ):
     # Only accept problems that exist, preserving the requested order
     problem_ids: list[str] = []
@@ -112,12 +113,18 @@ async def create_session(
     )
     db.add(session)
     await db.flush()
+    
+    # Increment usage counter after successful session creation
+    if subscription:
+        subscription.increment_usage()
+        await db.flush()
 
     invite = None
     if body.send_invite and session.candidate_email:
         invite = await _send_invite(session, current_user)
         await db.flush()
 
+    await db.commit()
     await db.refresh(session)
     return _out(session, invite)
 

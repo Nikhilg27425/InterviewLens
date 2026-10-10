@@ -65,3 +65,107 @@ async def get_session_for_user(session_id, db: AsyncSession, user: User):
     if user.role != UserRole.admin and user.id not in (sess.interviewer_id, sess.candidate_id):
         raise HTTPException(status_code=403, detail="Not your session")
     return sess
+
+
+async def check_interview_limit(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Check if user can create a new interview based on their subscription tier.
+    Raises 403 if limit is reached with upgrade information.
+    """
+    from app.models.subscription import Subscription, SubscriptionTier
+    
+    # Only check limits for interviewers
+    if current_user.role not in (UserRole.interviewer, UserRole.admin):
+        return
+    
+    # Get user's subscription
+    result = await db.execute(
+        select(Subscription).where(Subscription.user_id == current_user.id)
+    )
+    subscription = result.scalar_one_or_none()
+    
+    # If no subscription exists, create a default free one
+    if not subscription:
+        from app.models.subscription import SubscriptionStatus
+        subscription = Subscription(
+            user_id=current_user.id,
+            tier=SubscriptionTier.FREE,
+            status=SubscriptionStatus.ACTIVE,
+            monthly_interview_limit=5,
+            monthly_interviewer_limit=1,
+            interviews_used_this_month=0
+        )
+        db.add(subscription)
+        await db.commit()
+        await db.refresh(subscription)
+    
+    # Check if user can create interview
+    if not subscription.can_create_interview():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "message": "Interview limit reached",
+                "current_tier": subscription.tier.value,
+                "interviews_used": subscription.interviews_used_this_month,
+                "interviews_limit": subscription.monthly_interview_limit,
+                "upgrade_required": True,
+                "upgrade_url": "/pricing"
+            }
+        )
+    
+    return subscription
+
+
+def require_tier(minimum_tier: str):
+    """
+    Dependency factory that requires a minimum subscription tier.
+    
+    Usage:
+        @router.get("/premium-feature", dependencies=[Depends(require_tier("professional"))])
+    
+    Args:
+        minimum_tier: Minimum required tier ("free", "professional", "enterprise")
+    """
+    async def _check_tier(
+        current_user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db)
+    ):
+        from app.models.subscription import Subscription
+        
+        # Tier hierarchy: free=0, professional=1, enterprise=2
+        tier_levels = {
+            "free": 0,
+            "professional": 1,
+            "enterprise": 2
+        }
+        
+        required_level = tier_levels.get(minimum_tier.lower(), 0)
+        
+        # Get user's subscription
+        result = await db.execute(
+            select(Subscription).where(Subscription.user_id == current_user.id)
+        )
+        subscription = result.scalar_one_or_none()
+        
+        # Default to free if no subscription
+        user_tier = subscription.tier.value if subscription else "free"
+        user_level = tier_levels.get(user_tier, 0)
+        
+        if user_level < required_level:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "message": f"This feature requires {minimum_tier.title()} tier or higher",
+                    "current_tier": user_tier,
+                    "required_tier": minimum_tier,
+                    "upgrade_required": True,
+                    "upgrade_url": "/pricing"
+                }
+            )
+        
+        return subscription
+    
+    return _check_tier
