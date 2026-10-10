@@ -8,6 +8,8 @@ import AppLayout from './components/AppLayout'
 // ── Interviewer pages ──────────────────────────────────────────────────────
 import LandingPage from './pages/LandingPage'
 import Pricing from './pages/Pricing'
+import CheckoutSuccess from './pages/CheckoutSuccess'
+import CheckoutCanceled from './pages/CheckoutCanceled'
 import LoginPage from './pages/LoginPage'
 import OAuthCallback from './pages/OAuthCallback'
 import Dashboard from './pages/Dashboard'
@@ -34,6 +36,8 @@ export default function App() {
         {/* ── Public / marketing ── */}
         <Route path="/" element={<LandingPage />} />
         <Route path="/pricing" element={<Pricing />} />
+        <Route path="/checkout/success" element={<CheckoutSuccess />} />
+        <Route path="/checkout/canceled" element={<CheckoutCanceled />} />
 
         {/* ── Interviewer auth ── */}
         <Route path="/login" element={<LoginPage />} />
