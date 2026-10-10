@@ -27,18 +27,30 @@ def upgrade() -> None:
     op.add_column('subscriptions',
                   sa.Column('razorpay_plan_id', sa.String(), nullable=True))
     
-    # Rename column in invoices table
-    op.alter_column('invoices', 'stripe_invoice_id',
-                    new_column_name='razorpay_invoice_id')
+    # Rename column in invoices table (check if table exists first)
+    from sqlalchemy import inspect
+    conn = op.get_bind()
+    inspector = inspect(conn)
+    tables = inspector.get_table_names()
     
-    # Drop old indexes
-    op.drop_index('ix_subscriptions_stripe_customer_id', table_name='subscriptions')
-    op.drop_index('ix_subscriptions_stripe_subscription_id', table_name='subscriptions')
+    if 'invoices' in tables:
+        op.alter_column('invoices', 'stripe_invoice_id',
+                        new_column_name='razorpay_invoice_id')
     
-    # Create new indexes
-    op.create_index('ix_subscriptions_razorpay_customer_id', 'subscriptions', ['razorpay_customer_id'])
-    op.create_index('ix_subscriptions_razorpay_subscription_id', 'subscriptions', ['razorpay_subscription_id'])
-    op.create_index('ix_subscriptions_razorpay_plan_id', 'subscriptions', ['razorpay_plan_id'])
+    # Drop old indexes if they exist
+    indexes = [idx['name'] for idx in inspector.get_indexes('subscriptions')]
+    if 'ix_subscriptions_stripe_customer_id' in indexes:
+        op.drop_index('ix_subscriptions_stripe_customer_id', table_name='subscriptions')
+    if 'ix_subscriptions_stripe_subscription_id' in indexes:
+        op.drop_index('ix_subscriptions_stripe_subscription_id', table_name='subscriptions')
+    
+    # Create new indexes if they don't exist
+    if 'ix_subscriptions_razorpay_customer_id' not in indexes:
+        op.create_index('ix_subscriptions_razorpay_customer_id', 'subscriptions', ['razorpay_customer_id'])
+    if 'ix_subscriptions_razorpay_subscription_id' not in indexes:
+        op.create_index('ix_subscriptions_razorpay_subscription_id', 'subscriptions', ['razorpay_subscription_id'])
+    if 'ix_subscriptions_razorpay_plan_id' not in indexes:
+        op.create_index('ix_subscriptions_razorpay_plan_id', 'subscriptions', ['razorpay_plan_id'])
 
 
 def downgrade() -> None:

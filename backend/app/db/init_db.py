@@ -39,17 +39,28 @@ async def _prepare() -> bool | None:
 
 
 def init():
-    cfg = Config(str(BACKEND_DIR / "alembic.ini"))
-    cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
+    try:
+        cfg = Config(str(BACKEND_DIR / "alembic.ini"))
+        cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
 
-    fresh = asyncio.run(_prepare())
-    if fresh is True:
-        command.stamp(cfg, "head")
-    elif fresh is False:
-        command.stamp(cfg, "0001")
+        fresh = asyncio.run(_prepare())
+        if fresh is True:
+            print("→ Fresh database detected, stamping as head")
+            command.stamp(cfg, "head")
+        elif fresh is False:
+            print("→ Existing database without Alembic tracking, stamping as 0001")
+            command.stamp(cfg, "0001")
+        else:
+            print("→ Database already tracked by Alembic")
 
-    command.upgrade(cfg, "head")
-    print("✓ Database schema is up to date.")
+        print("→ Running database migrations...")
+        command.upgrade(cfg, "head")
+        print("✓ Database schema is up to date.")
+    except Exception as e:
+        print(f"✗ Database migration failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
 
 
 if __name__ == "__main__":
