@@ -4,8 +4,17 @@ import hashlib
 from typing import Optional, Dict, Any
 from app.core.config import settings
 
-# Initialize Razorpay client
-client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
+# Initialize Razorpay client (lazy initialization to handle missing credentials gracefully)
+_client = None
+
+def get_razorpay_client():
+    """Get or create Razorpay client instance"""
+    global _client
+    if _client is None:
+        if not settings.RAZORPAY_KEY_ID or not settings.RAZORPAY_KEY_SECRET:
+            raise ValueError("Razorpay credentials not configured. Set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET environment variables.")
+        _client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
+    return _client
 
 
 class RazorpayService:
@@ -49,7 +58,7 @@ class RazorpayService:
             if customer_name:
                 subscription_data['customer']['name'] = customer_name
         
-        subscription = client.subscription.create(subscription_data)
+        subscription = get_razorpay_client().subscription.create(subscription_data)
         return subscription
     
     @staticmethod
@@ -63,7 +72,7 @@ class RazorpayService:
         Returns:
             Subscription object
         """
-        return client.subscription.fetch(subscription_id)
+        return get_razorpay_client().subscription.fetch(subscription_id)
     
     @staticmethod
     def cancel_subscription(subscription_id: str, cancel_at_cycle_end: bool = True) -> Dict[str, Any]:
@@ -77,7 +86,7 @@ class RazorpayService:
         Returns:
             Subscription object
         """
-        return client.subscription.cancel(subscription_id, {
+        return get_razorpay_client().subscription.cancel(subscription_id, {
             'cancel_at_cycle_end': 1 if cancel_at_cycle_end else 0
         })
     
@@ -92,7 +101,7 @@ class RazorpayService:
         Returns:
             Subscription object
         """
-        return client.subscription.pause(subscription_id)
+        return get_razorpay_client().subscription.pause(subscription_id)
     
     @staticmethod
     def resume_subscription(subscription_id: str) -> Dict[str, Any]:
@@ -105,7 +114,7 @@ class RazorpayService:
         Returns:
             Subscription object
         """
-        return client.subscription.resume(subscription_id)
+        return get_razorpay_client().subscription.resume(subscription_id)
     
     @staticmethod
     def get_plan_id_for_tier(tier: str) -> Optional[str]:
@@ -160,7 +169,7 @@ class RazorpayService:
         Returns:
             Payment object
         """
-        return client.payment.fetch(payment_id)
+        return get_razorpay_client().payment.fetch(payment_id)
     
     @staticmethod
     def fetch_invoice(invoice_id: str) -> Dict[str, Any]:
@@ -173,4 +182,4 @@ class RazorpayService:
         Returns:
             Invoice object
         """
-        return client.invoice.fetch(invoice_id)
+        return get_razorpay_client().invoice.fetch(invoice_id)
