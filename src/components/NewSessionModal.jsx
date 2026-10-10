@@ -351,13 +351,15 @@ export default function NewSessionModal({ onClose, onCreated }) {
       </div>
       
       {/* Upgrade Modal */}
-      <UpgradeModal
-        isOpen={showUpgradeModal}
-        onClose={() => setShowUpgradeModal(false)}
-        currentTier={usage?.tier || 'free'}
-        reason="You've reached your monthly interview limit"
-        feature="unlimited interviews"
-      />
-    </>
+      {showUpgradeModal && (
+        <UpgradeModal
+          isOpen={showUpgradeModal}
+          onClose={() => setShowUpgradeModal(false)}
+          currentTier={usage?.tier || 'free'}
+          reason="You've reached your monthly interview limit"
+          feature="unlimited interviews"
+        />
+      )}
+    </div>
   )
 }
