@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useMemo } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   Users, TrendingUp, CheckCircle, AlertTriangle,
-  Play, Clock, ShieldAlert, ChevronRight,
+  Play, Clock, ShieldAlert, ChevronRight, Crown, Zap,
 } from 'lucide-react'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
 import NewSessionModal from '../components/NewSessionModal'
 import { analyticsAPI, sessionsAPI } from '../services/api'
+import { getSubscriptionStatus, getUsageStats, getTierDisplayName, getTierColors, initiateCheckout } from '../services/checkout'
 
 const STATUS_LABEL = {
   active: 'Live', waiting: 'Waiting', scheduled: 'Scheduled', completed: 'Completed', cancelled: 'Cancelled',
@@ -42,6 +43,7 @@ function StatCard({ label, value, hint, icon: Icon, color }) {
 }
 
 export default function Dashboard() {
+  const navigate = useNavigate()
   const [showNew, setShowNew] = useState(false)
   const [reloadKey, setReloadKey] = useState(0)
   const [activeTab, setActiveTab] = useState('All')
@@ -49,16 +51,32 @@ export default function Dashboard() {
   const [overview, setOverview] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  
+  // Subscription state
+  const [subscription, setSubscription] = useState(null)
+  const [usage, setUsage] = useState(null)
+  const [subLoading, setSubLoading] = useState(true)
+  const [upgrading, setUpgrading] = useState(false)
 
   useEffect(() => {
     setError('')
-    Promise.all([sessionsAPI.list(), analyticsAPI.overview()])
-      .then(([{ data: list }, { data: ov }]) => {
+    Promise.all([
+      sessionsAPI.list(),
+      analyticsAPI.overview(),
+      getSubscriptionStatus(),
+      getUsageStats()
+    ])
+      .then(([{ data: list }, { data: ov }, subData, usageData]) => {
         setSessions(list)
         setOverview(ov)
+        setSubscription(subData)
+        setUsage(usageData)
       })
       .catch(() => setError('Could not load your sessions. Is the backend running?'))
-      .finally(() => setLoading(false))
+      .finally(() => {
+        setLoading(false)
+        setSubLoading(false)
+      })
   }, [reloadKey])
 
   const riskFor = (id) => overview?.per_session?.[id] || { high: 0, medium: 0, low: 0 }
@@ -94,8 +112,105 @@ export default function Dashboard() {
     { label: 'HIGH-RISK SIGNALS', value: overview?.high_risk_signals ?? 0, icon: AlertTriangle, color: 'red', hint: overview ? `${overview.flagged_sessions} sessions` : null },
   ]
 
+  const handleUpgrade = async (tier) => {
+    setUpgrading(true)
+    try {
+      const checkoutUrl = await initiateCheckout(tier)
+      window.location.href = checkoutUrl
+    } catch (err) {
+      alert('Failed to start checkout. Please try again.')
+      setUpgrading(false)
+    }
+  }
+
+  const tierColors = subscription ? getTierColors(subscription.tier) : { bg: 'bg-gray-100', text: 'text-gray-700', border: 'border-gray-200' }
+  const tierName = subscription ? getTierDisplayName(subscription.tier) : 'Loading...'
+  const isFreeTier = subscription?.tier === 'free'
+  const isProfessionalTier = subscription?.tier === 'professional'
+  const isEnterpriseTier = subscription?.tier === 'enterprise'
+  
+  // Calculate usage percentage
+  const usagePercentage = usage?.interviews_limit && usage.interviews_limit > 0
+    ? Math.min(100, (usage.interviews_used / usage.interviews_limit) * 100)
+    : 0
+  const isNearLimit = usagePercentage >= 80
+
   return (
     <div className="p-6 space-y-6">
+      {/* Subscription Status Banner */}
+      {!subLoading && subscription && (
+        <div className={`${tierColors.bg} ${tierColors.border} border-2 rounded-2xl p-5 transition-all duration-300`}>
+          <div className="flex items-center justify-between flex-wrap gap-4">
+            <div className="flex items-center gap-4">
+              <div className={`w-12 h-12 rounded-xl ${isEnterpriseTier ? 'bg-gradient-to-br from-purple-500 to-pink-600' : isFreeTier ? 'bg-gray-200' : 'bg-gradient-to-br from-blue-500 to-indigo-600'} flex items-center justify-center flex-shrink-0`}>
+                {isEnterpriseTier ? <Crown size={24} className="text-white" /> : <Zap size={24} className={isFreeTier ? 'text-gray-500' : 'text-white'} />}
+              </div>
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <h3 className={`text-lg font-bold ${tierColors.text}`}>{tierName} Plan</h3>
+                  {subscription.status === 'active' && !isFreeTier && (
+                    <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs font-semibold rounded-full">Active</span>
+                  )}
+                </div>
+                {usage && (
+                  <div className="flex items-center gap-4 text-sm">
+                    <span className={`font-medium ${isNearLimit ? 'text-orange-600' : 'text-gray-600'}`}>
+                      {usage.interviews_limit === -1 ? (
+                        <>Unlimited interviews this month</>
+                      ) : (
+                        <>
+                          {usage.interviews_used} / {usage.interviews_limit} interviews used
+                          {isNearLimit && <span className="ml-1 text-orange-600 font-semibold">({Math.round(usagePercentage)}%)</span>}
+                        </>
+                      )}
+                    </span>
+                    <span className="text-gray-400">•</span>
+                    <span className="text-gray-600 font-medium">
+                      {usage.interviewers_limit === -1 ? 'Unlimited interviewers' : `Up to ${usage.interviewers_limit} interviewer${usage.interviewers_limit > 1 ? 's' : ''}`}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              {(isFreeTier || isProfessionalTier) && (
+                <button
+                  onClick={() => handleUpgrade(isFreeTier ? 'professional' : 'enterprise')}
+                  disabled={upgrading}
+                  className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold transition-all duration-300 ${
+                    upgrading 
+                      ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                      : 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-700 hover:to-indigo-700 hover:shadow-lg hover:scale-105'
+                  }`}
+                >
+                  <Crown size={16} />
+                  {upgrading ? 'Processing...' : isFreeTier ? 'Upgrade to Professional' : 'Upgrade to Enterprise'}
+                </button>
+              )}
+              <button
+                onClick={() => navigate('/settings?tab=billing')}
+                className="px-4 py-2.5 rounded-lg text-sm font-semibold text-gray-700 bg-white border-2 border-gray-200 hover:border-gray-300 hover:bg-gray-50 transition-colors"
+              >
+                Manage Subscription
+              </button>
+            </div>
+          </div>
+          {/* Usage Progress Bar */}
+          {usage && usage.interviews_limit > 0 && (
+            <div className="mt-4">
+              <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+                <div
+                  className={`h-full transition-all duration-500 ${
+                    usagePercentage >= 100 ? 'bg-red-500' : isNearLimit ? 'bg-orange-500' : 'bg-blue-600'
+                  }`}
+                  style={{ width: `${Math.min(100, usagePercentage)}%` }}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
