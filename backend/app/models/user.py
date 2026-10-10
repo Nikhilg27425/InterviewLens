@@ -32,6 +32,9 @@ class User(Base):
     oauth_provider: Mapped[str | None] = mapped_column(String(50), nullable=True)  # 'google', 'github', None
     oauth_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)  # Provider's user ID
     profile_picture: Mapped[str | None] = mapped_column(String(500), nullable=True)  # Profile picture URL
+    
+    # Subscription tier
+    subscription_tier: Mapped[str] = mapped_column(String(50), nullable=False, default='free')
 
     # relationships
     sessions_as_interviewer: Mapped[list["InterviewSession"]] = relationship(
@@ -40,6 +43,8 @@ class User(Base):
     sessions_as_candidate: Mapped[list["InterviewSession"]] = relationship(
         "InterviewSession", back_populates="candidate", foreign_keys="InterviewSession.candidate_id"
     )
+    subscription = relationship("Subscription", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    invoices = relationship("Invoice", back_populates="user", cascade="all, delete-orphan")
 
     @property
     def has_password(self) -> bool:

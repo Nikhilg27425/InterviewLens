@@ -38,6 +38,13 @@ class Settings(BaseSettings):
     SMTP_USE_TLS: bool = True          # STARTTLS on 587; set False and use port 465 for implicit SSL
     EMAIL_FROM: str = "InterviewLens <no-reply@interviewlens.local>"
     EMAIL_OUTBOX_DIR: str = "outbox"
+    
+    # Stripe Configuration
+    STRIPE_SECRET_KEY: str = ""
+    STRIPE_PUBLISHABLE_KEY: str = ""
+    STRIPE_WEBHOOK_SECRET: str = ""
+    STRIPE_PRICE_PROFESSIONAL: str = ""  # Stripe Price ID for Professional tier
+    STRIPE_PRICE_ENTERPRISE: str = ""    # Stripe Price ID for Enterprise tier
 
     # Directory holding the built frontend (served by FastAPI in production)
     STATIC_DIR: str = "static"
