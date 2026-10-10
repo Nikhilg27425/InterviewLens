@@ -29,9 +29,10 @@ class Subscription(Base):
     tier = Column(SQLEnum(SubscriptionTier), nullable=False, default=SubscriptionTier.FREE)
     status = Column(SQLEnum(SubscriptionStatus), nullable=False, default=SubscriptionStatus.ACTIVE)
     
-    # Stripe IDs
-    stripe_customer_id = Column(String, nullable=True)
-    stripe_subscription_id = Column(String, nullable=True)
+    # Razorpay IDs
+    razorpay_customer_id = Column(String, nullable=True)
+    razorpay_subscription_id = Column(String, nullable=True)
+    razorpay_plan_id = Column(String, nullable=True)
     
     # Billing period
     current_period_start = Column(DateTime(timezone=True), nullable=True)
@@ -112,9 +113,9 @@ class Invoice(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     
-    # Stripe details
-    stripe_invoice_id = Column(String, nullable=False, unique=True)
-    amount = Column(Integer, nullable=False)  # Amount in paise (₹1 = 100 paise)
+    # Razorpay details
+    razorpay_invoice_id = Column(String, nullable=False, unique=True)
+    amount = Column(Integer, nullable=False)  # Amount in rupees
     currency = Column(String(3), nullable=False, default="INR")
     status = Column(String, nullable=False)  # paid, open, void, uncollectible
     invoice_pdf = Column(String, nullable=True)

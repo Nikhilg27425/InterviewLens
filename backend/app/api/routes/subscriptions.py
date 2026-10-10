@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List
 import logging
+import json
 
 from app.api.deps import get_current_user, get_db
 from app.models.user import User
@@ -18,7 +19,7 @@ from app.schemas.subscription import (
     CancelSubscriptionRequest,
     CancelSubscriptionResponse
 )
-from app.services.stripe_service import StripeService, get_tier_limits
+from app.services.razorpay_service import RazorpayService
 from app.services.webhook_handler import WebhookHandler
 from app.core.config import settings
 
@@ -63,7 +64,7 @@ async def get_subscription_status(
         interviews_limit=subscription.monthly_interview_limit,
         usage_percentage=subscription.get_usage_percentage(),
         is_active=subscription.is_active(),
-        stripe_customer_id=subscription.stripe_customer_id
+        razorpay_customer_id=subscription.razorpay_customer_id
     )
 
 
@@ -104,7 +105,7 @@ async def create_checkout_session(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Create a Stripe checkout session for subscription purchase
+    Create a Razorpay subscription for purchase
     """
     # Validate tier
     if request.tier not in ['professional', 'enterprise']:
@@ -119,112 +120,110 @@ async def create_checkout_session(
     )
     subscription = result.scalar_one_or_none()
     
-    # Create Stripe customer if doesn't exist
-    if not subscription or not subscription.stripe_customer_id:
-        try:
-            customer = StripeService.create_customer(
-                email=current_user.email,
-                name=current_user.full_name,
-                metadata={'user_id': str(current_user.id)}
-            )
-            customer_id = customer.id
-            
-            # Update or create subscription record
-            if not subscription:
-                subscription = Subscription(
-                    user_id=current_user.id,
-                    stripe_customer_id=customer_id
-                )
-                db.add(subscription)
-            else:
-                subscription.stripe_customer_id = customer_id
-            
-            await db.commit()
-        except Exception as e:
-            logger.error(f"Error creating Stripe customer: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to create payment customer"
-            )
-    else:
-        customer_id = subscription.stripe_customer_id
+    if not subscription:
+        subscription = Subscription(user_id=current_user.id)
+        db.add(subscription)
+        await db.commit()
+        await db.refresh(subscription)
     
-    # Get price ID for tier
-    price_id = StripeService.get_price_id_for_tier(request.tier)
-    if not price_id:
+    # Get plan ID for tier
+    plan_id = RazorpayService.get_plan_id_for_tier(request.tier)
+    if not plan_id:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Price not configured for tier: {request.tier}"
+            detail=f"Plan not configured for tier: {request.tier}"
         )
     
-    # Create checkout session
+    # Create Razorpay subscription
     try:
-        success_url = f"{settings.FRONTEND_URL}/checkout/success?session_id={{CHECKOUT_SESSION_ID}}"
-        cancel_url = f"{settings.FRONTEND_URL}/checkout/canceled"
-        
-        session = StripeService.create_checkout_session(
-            customer_id=customer_id,
-            price_id=price_id,
-            success_url=success_url,
-            cancel_url=cancel_url,
-            metadata={
+        razorpay_subscription = RazorpayService.create_subscription(
+            plan_id=plan_id,
+            customer_email=current_user.email,
+            customer_name=current_user.full_name,
+            notes={
                 'user_id': str(current_user.id),
                 'tier': request.tier
             }
         )
         
+        # Get payment link (short_url)
+        payment_url = razorpay_subscription.get('short_url')
+        subscription_id = razorpay_subscription.get('id')
+        
+        if not payment_url:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to generate payment link"
+            )
+        
         return CheckoutSessionResponse(
-            checkout_url=session.url,
-            session_id=session.id
+            payment_url=payment_url,
+            session_id=subscription_id
         )
     except Exception as e:
-        logger.error(f"Error creating checkout session: {str(e)}")
+        logger.error(f"Error creating Razorpay subscription: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create checkout session"
+            detail="Failed to create subscription"
         )
 
 
 @router.post("/webhook", status_code=status.HTTP_200_OK)
-async def stripe_webhook(
+async def razorpay_webhook(
     request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Handle Stripe webhook events (no authentication required)
+    Handle Razorpay webhook events (no authentication required)
     """
     # Get raw body and signature
     payload = await request.body()
-    sig_header = request.headers.get('stripe-signature')
+    sig_header = request.headers.get('X-Razorpay-Signature')
     
     if not sig_header:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Missing stripe-signature header"
+            detail="Missing X-Razorpay-Signature header"
         )
     
-    # Verify and construct event
-    try:
-        event = StripeService.construct_webhook_event(
-            payload,
-            sig_header,
-            settings.STRIPE_WEBHOOK_SECRET
-        )
-    except ValueError as e:
-        logger.error(f"Invalid payload: {str(e)}")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid payload")
-    except Exception as e:
-        logger.error(f"Webhook signature verification failed: {str(e)}")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid signature")
+    # Verify webhook signature
+    is_valid = RazorpayService.verify_webhook_signature(
+        payload,
+        sig_header,
+        settings.RAZORPAY_WEBHOOK_SECRET
+    )
     
-    # Process webhook event
+    if not is_valid:
+        logger.error("Webhook signature verification failed")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid signature"
+        )
+    
+    # Parse webhook data
     try:
+        event_data = json.loads(payload)
+        event_type = event_data.get('event')
+        
+        if not event_type:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Missing event type"
+            )
+        
+        # Process webhook event
         await WebhookHandler.process_webhook(
-            event_type=event['type'],
-            event_data=event['data'],
+            event_type=event_type,
+            event_data=event_data,
             db=db
         )
         return {"status": "success"}
+    except json.JSONDecodeError as e:
+        logger.error(f"Invalid JSON payload: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid JSON payload"
+        )
     except Exception as e:
         logger.error(f"Error processing webhook: {str(e)}")
         raise HTTPException(
@@ -315,7 +314,7 @@ async def cancel_subscription(
     )
     subscription = result.scalar_one_or_none()
     
-    if not subscription or not subscription.stripe_subscription_id:
+    if not subscription or not subscription.razorpay_subscription_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No active subscription found"
@@ -327,11 +326,11 @@ async def cancel_subscription(
             detail="Cannot cancel free tier"
         )
     
-    # Cancel in Stripe (at period end)
+    # Cancel in Razorpay (at period end)
     try:
-        StripeService.cancel_subscription(
-            subscription.stripe_subscription_id,
-            at_period_end=True
+        RazorpayService.cancel_subscription(
+            subscription.razorpay_subscription_id,
+            cancel_at_cycle_end=True
         )
         
         # Update local status
@@ -369,7 +368,7 @@ async def get_invoices(
     return [
         InvoiceResponse(
             id=invoice.id,
-            stripe_invoice_id=invoice.stripe_invoice_id,
+            razorpay_invoice_id=invoice.razorpay_invoice_id,
             amount=invoice.amount,
             currency=invoice.currency,
             status=invoice.status,

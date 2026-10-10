@@ -21,8 +21,8 @@ class CheckoutSessionRequest(BaseModel):
 
 
 class CheckoutSessionResponse(BaseModel):
-    checkout_url: str = Field(..., description="Stripe checkout session URL")
-    session_id: str = Field(..., description="Stripe checkout session ID")
+    payment_url: str = Field(..., description="Razorpay payment link URL")
+    session_id: str = Field(..., description="Razorpay subscription ID")
 
 
 class UsageResponse(BaseModel):
@@ -51,7 +51,7 @@ class SubscriptionStatusResponse(BaseModel):
     interviews_limit: int = Field(..., description="Monthly interview limit")
     usage_percentage: float = Field(..., description="Usage as percentage")
     is_active: bool = Field(..., description="Whether subscription is active")
-    stripe_customer_id: Optional[str] = Field(None, description="Stripe customer ID")
+    razorpay_customer_id: Optional[str] = Field(None, description="Razorpay customer ID")
     
     class Config:
         from_attributes = True
@@ -65,7 +65,7 @@ class SubscriptionStatusResponse(BaseModel):
                 "interviews_limit": 50,
                 "usage_percentage": 30.0,
                 "is_active": True,
-                "stripe_customer_id": "cus_abc123"
+                "razorpay_customer_id": "cust_abc123"
             }
         }
 
@@ -75,8 +75,8 @@ class SubscriptionResponse(BaseModel):
     user_id: UUID
     tier: str
     status: str
-    stripe_customer_id: Optional[str]
-    stripe_subscription_id: Optional[str]
+    razorpay_customer_id: Optional[str]
+    razorpay_subscription_id: Optional[str]
     current_period_start: Optional[datetime]
     current_period_end: Optional[datetime]
     monthly_interview_limit: int
@@ -132,8 +132,8 @@ class PlansResponse(BaseModel):
 
 class InvoiceResponse(BaseModel):
     id: UUID
-    stripe_invoice_id: str
-    amount: int = Field(..., description="Amount in paise")
+    razorpay_invoice_id: str
+    amount: int = Field(..., description="Amount in rupees")
     currency: str
     status: str
     invoice_pdf: Optional[str]
