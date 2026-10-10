@@ -17,6 +17,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PORT=8000
 WORKDIR /app
 
+# Install setuptools first (required by razorpay for pkg_resources)
+RUN pip install setuptools>=65.0.0
+
 COPY backend/requirements.txt .
 RUN pip install -r requirements.txt
 
