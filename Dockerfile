@@ -9,10 +9,7 @@ COPY src ./src
 RUN npm run build
 
 # ── Stage 2: API + WebSocket server that also serves the built frontend ───────
-FROM python:3.13-slim
-
-# Force rebuild from here - cache bust for setuptools fix
-ENV CACHE_BUST=2026-10-10-v2
+FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -21,11 +18,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PORT=8000
 WORKDIR /app
 
-# Install setuptools first (required by razorpay for pkg_resources)
-RUN pip install --no-cache-dir setuptools>=65.0.0
-
 COPY backend/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install -r requirements.txt
 
 COPY backend/ .
 COPY --from=frontend /app/dist ./static
