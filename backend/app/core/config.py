@@ -38,13 +38,6 @@ class Settings(BaseSettings):
     SMTP_USE_TLS: bool = True          # STARTTLS on 587; set False and use port 465 for implicit SSL
     EMAIL_FROM: str = "InterviewLens <no-reply@interviewlens.local>"
     EMAIL_OUTBOX_DIR: str = "outbox"
-    
-    # Razorpay Configuration (Payment Processing)
-    RAZORPAY_KEY_ID: str = ""
-    RAZORPAY_KEY_SECRET: str = ""
-    RAZORPAY_WEBHOOK_SECRET: str = ""
-    RAZORPAY_PLAN_PROFESSIONAL: str = ""  # Razorpay Plan ID for Professional tier (₹200/month)
-    RAZORPAY_PLAN_ENTERPRISE: str = ""    # Razorpay Plan ID for Enterprise tier (₹500/month)
 
     # Directory holding the built frontend (served by FastAPI in production)
     STATIC_DIR: str = "static"

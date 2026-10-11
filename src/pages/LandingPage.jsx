@@ -40,12 +40,6 @@ function LandingNavbar() {
               {item.label}
             </a>
           ))}
-          <Link
-            to="/pricing"
-            className="text-sm text-gray-600 hover:text-gray-900 font-medium transition-all duration-300 hover:scale-105"
-          >
-            Pricing
-          </Link>
         </div>
         <div className="flex items-center gap-3">
           <Link
