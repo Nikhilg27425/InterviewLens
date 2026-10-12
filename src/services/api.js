@@ -56,7 +56,7 @@ api.interceptors.request.use((config) => {
   return config
 })
 
-// ── Response: handle 401 globally ────────────────────────────────────────────
+// ── Response: handle 401 and 402 globally ────────────────────────────────────
 api.interceptors.response.use(
   (r) => r,
   (err) => {
@@ -68,6 +68,17 @@ api.interceptors.response.use(
         localStorage.removeItem('access_token')
         localStorage.removeItem('user')
       }
+    }
+    if (
+      err.response?.status === 402 &&
+      err.response?.data?.detail?.code === 'interview_limit_reached'
+    ) {
+      // Notify UpgradeModal (rendered at app level) without coupling to router
+      window.dispatchEvent(
+        new CustomEvent('interviewLimitReached', {
+          detail: err.response.data.detail,
+        })
+      )
     }
     return Promise.reject(err)
   }

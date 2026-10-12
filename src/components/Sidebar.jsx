@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard,
@@ -9,8 +9,11 @@ import {
   HelpCircle,
   LogOut,
   BookOpen,
+  CreditCard,
+  Zap,
 } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
+import { useSubscription } from '../contexts/SubscriptionContext'
 
 const navItems = [
   { label: 'Dashboard', icon: LayoutDashboard, to: '/dashboard' },
@@ -21,13 +24,15 @@ const navItems = [
 ]
 
 const bottomItems = [
+  { label: 'Billing', icon: CreditCard, to: '/billing' },
   { label: 'Settings', icon: Settings, to: '/settings' },
   { label: 'Help Center', icon: HelpCircle, to: '/help' },
 ]
 
-export default function Sidebar() {
+export default function Sidebar({ onUpgradeClick }) {
   const navigate = useNavigate()
   const { logout } = useAuth()
+  const { tier, used, limit, percentUsed, isUnlimited, isExpired, loading } = useSubscription()
 
   const handleSignOut = () => {
     logout()
@@ -36,7 +41,7 @@ export default function Sidebar() {
 
   return (
     <aside className="fixed top-14 left-0 bottom-0 w-44 bg-white border-r border-gray-200 flex flex-col z-40">
-      <nav className="flex-1 py-4 px-2">
+      <nav className="flex-1 py-4 px-2 overflow-y-auto">
         <ul className="space-y-0.5">
           {navItems.map(({ label, icon: Icon, to }) => (
             <li key={to}>
@@ -57,6 +62,40 @@ export default function Sidebar() {
           ))}
         </ul>
       </nav>
+
+      {/* ── Usage indicator ── */}
+      {!loading && !isUnlimited && (
+        <div className="px-3 py-3 border-t border-gray-100">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-xs text-gray-400">
+              {isExpired ? 'Plan expired' : `${used} / ${limit}`}
+            </span>
+            <button
+              onClick={onUpgradeClick}
+              className="text-xs text-blue-500 hover:text-blue-700 transition-colors font-medium"
+            >
+              {isExpired ? 'Renew' : 'Upgrade'}
+            </button>
+          </div>
+          {!isExpired && (
+            <div className="w-full h-1 bg-gray-100 rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all duration-500 ${
+                  percentUsed >= 100 ? 'bg-red-500' :
+                  percentUsed >= 80  ? 'bg-amber-400' :
+                                       'bg-blue-400'
+                }`}
+                style={{ width: `${Math.min(percentUsed, 100)}%` }}
+              />
+            </div>
+          )}
+          {isExpired && (
+            <div className="w-full h-1 bg-red-100 rounded-full">
+              <div className="h-full w-full bg-red-400 rounded-full" />
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Bottom section */}
       <div className="py-4 px-2 border-t border-gray-100">

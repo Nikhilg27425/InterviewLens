@@ -46,6 +46,10 @@ class InterviewSession(Base):
     ai_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     final_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    # Quota tracking — True when this session has been counted against the interviewer's limit.
+    # Guards idempotent credit-back on cancellation.
+    quota_consumed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
     interviewer: Mapped["User"] = relationship("User", back_populates="sessions_as_interviewer", foreign_keys=[interviewer_id])
     candidate: Mapped["User | None"] = relationship("User", back_populates="sessions_as_candidate", foreign_keys=[candidate_id])
 

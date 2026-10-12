@@ -8,7 +8,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 
 from app.core.config import settings
 from app.db.base import engine, Base
-from app.api.routes import auth, problems, sessions, submissions, signals, analytics, execute
+from app.api.routes import auth, problems, sessions, submissions, signals, analytics, execute, subscriptions
 from app.websocket.router import router as ws_router
 
 # Import all models so SQLAlchemy metadata is populated before create_all
@@ -51,7 +51,8 @@ app.include_router(sessions.router,    prefix=API)
 app.include_router(submissions.router, prefix=API)
 app.include_router(signals.router,     prefix=API)
 app.include_router(analytics.router,   prefix=API)
-app.include_router(execute.router,     prefix=API)   # Judge0 CORS proxy
+app.include_router(execute.router,        prefix=API)   # Judge0 CORS proxy
+app.include_router(subscriptions.router, prefix=API)
 
 # ── WebSocket ─────────────────────────────────────────────────────────────────
 

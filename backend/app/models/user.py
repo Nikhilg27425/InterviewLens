@@ -33,12 +33,21 @@ class User(Base):
     oauth_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)  # Provider's user ID
     profile_picture: Mapped[str | None] = mapped_column(String(500), nullable=True)  # Profile picture URL
 
+    # Denormalized subscription tier for fast quota checks (kept in sync by entitlement service)
+    subscription_tier: Mapped[str] = mapped_column(String(20), nullable=False, default="free")
+
     # relationships
     sessions_as_interviewer: Mapped[list["InterviewSession"]] = relationship(
         "InterviewSession", back_populates="interviewer", foreign_keys="InterviewSession.interviewer_id"
     )
     sessions_as_candidate: Mapped[list["InterviewSession"]] = relationship(
         "InterviewSession", back_populates="candidate", foreign_keys="InterviewSession.candidate_id"
+    )
+    subscription: Mapped["Subscription | None"] = relationship(
+        "Subscription", back_populates="user", uselist=False
+    )
+    payment_records: Mapped[list["PaymentRecord"]] = relationship(
+        "PaymentRecord", back_populates="user"
     )
 
     @property

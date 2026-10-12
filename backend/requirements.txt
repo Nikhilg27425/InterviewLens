@@ -33,5 +33,8 @@ scikit-learn==1.9.1
 # Env
 python-dotenv==1.2.3
 
+# Payment
+razorpay==1.4.2
+
 # Testing
 pytest==9.1.1

@@ -9,6 +9,7 @@ import {
 } from 'recharts'
 import NewSessionModal from '../components/NewSessionModal'
 import { analyticsAPI, sessionsAPI } from '../services/api'
+import { useSubscription } from '../contexts/SubscriptionContext'
 
 const STATUS_LABEL = {
   active: 'Live', waiting: 'Waiting', scheduled: 'Scheduled', completed: 'Completed', cancelled: 'Cancelled',
@@ -41,8 +42,40 @@ function StatCard({ label, value, hint, icon: Icon, color }) {
   )
 }
 
-export default function Dashboard() {
-  const [showNew, setShowNew] = useState(false)
+function QuotaBanner() {
+  const { percentUsed, isUnlimited, isExpired, used, limit } = useSubscription()
+  if (isUnlimited) return null
+  if (percentUsed < 80 && !isExpired) return null
+
+  const isBlocked = percentUsed >= 100 || isExpired
+  const remaining = Math.max(0, limit - used)
+
+  return (
+    <div className={`flex items-center justify-between px-4 py-3 rounded-lg text-sm border ${
+      isBlocked
+        ? 'bg-red-50 border-red-200 text-red-700'
+        : 'bg-amber-50 border-amber-200 text-amber-700'
+    }`}>
+      <span>
+        {isExpired
+          ? 'Your plan has expired. Renew to create new interviews.'
+          : isBlocked
+          ? `Interview limit reached (${used}/${limit}). Upgrade to continue.`
+          : `Running low — ${remaining} interview${remaining === 1 ? '' : 's'} remaining this month.`}
+      </span>
+      {isBlocked && (
+        <button
+          onClick={() => window.dispatchEvent(new CustomEvent('openUpgradeModal'))}
+          className="ml-4 px-3 py-1 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 transition-colors shrink-0"
+        >
+          {isExpired ? 'Renew Plan' : 'Upgrade'}
+        </button>
+      )}
+    </div>
+  )
+}
+
+export default function Dashboard() {  const [showNew, setShowNew] = useState(false)
   const [reloadKey, setReloadKey] = useState(0)
   const [activeTab, setActiveTab] = useState('All')
   const [sessions, setSessions] = useState([])
@@ -116,6 +149,9 @@ export default function Dashboard() {
           <AlertTriangle size={15} /> {error}
         </div>
       )}
+
+      {/* Quota warning banner — only at 80%+ usage, never for unlimited */}
+      <QuotaBanner />
 
       {/* Stat Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

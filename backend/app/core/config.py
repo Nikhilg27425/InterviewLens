@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     # Directory holding the built frontend (served by FastAPI in production)
     STATIC_DIR: str = "static"
 
+    RAZORPAY_KEY_ID: str = ""
+    RAZORPAY_KEY_SECRET: str = ""
+    RAZORPAY_WEBHOOK_SECRET: str = ""
+
     @model_validator(mode="after")
     def _derive(self):
         # Hosting providers hand out postgres:// / postgresql:// URLs; SQLAlchemy's
@@ -59,6 +63,12 @@ class Settings(BaseSettings):
 
         if self.ENV == "production" and self.SECRET_KEY == DEV_SECRET_KEY:
             raise ValueError("SECRET_KEY must be set in production")
+        if self.ENV == "production" and not all([
+            self.RAZORPAY_KEY_ID,
+            self.RAZORPAY_KEY_SECRET,
+            self.RAZORPAY_WEBHOOK_SECRET,
+        ]):
+            raise ValueError("RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, and RAZORPAY_WEBHOOK_SECRET must be set in production")
         return self
 
     @property

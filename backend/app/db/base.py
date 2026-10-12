@@ -11,6 +11,7 @@ class Base(DeclarativeBase):
 
 
 async def get_db():
+    # Use the module-level AsyncSessionLocal so tests can patch it.
     async with AsyncSessionLocal() as session:
         try:
             yield session

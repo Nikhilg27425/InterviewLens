@@ -2,11 +2,11 @@ import uuid
 import secrets
 import string
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, update
 
-from app.db.base import get_db
+from app.db.base import get_db, AsyncSessionLocal
 from app.models.session import InterviewSession, SessionStatus
 from app.models.problem import Problem
 from app.models.user import User, UserRole
@@ -14,6 +14,9 @@ from app.schemas.session import (
     SessionCreate, SessionUpdate, SessionOut, SessionSummary, InviteStatus, InvitePreview,
 )
 from app.services import email as mailer
+from app.services.entitlement import (
+    consume_quota_and_create_session, refund_quota, QuotaExceededError,
+)
 from app.api.deps import get_current_user, require_interviewer
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
@@ -56,6 +59,36 @@ async def _send_invite(session: InterviewSession, interviewer: User) -> InviteSt
     return InviteStatus(sent=result.sent, mode=result.mode, detail=result.detail)
 
 
+async def _send_invite_background(
+    session_id: uuid.UUID,
+    interviewer_id: uuid.UUID,
+) -> None:
+    """
+    Runs as a FastAPI BackgroundTask — AFTER the DB transaction has committed.
+    Opens its own session to avoid holding quota lock during SMTP/outbox write.
+    Best-effort: if email fails, session is still created and quota consumed.
+    """
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+    try:
+        async with AsyncSessionLocal() as db:
+            session = (await db.execute(
+                select(InterviewSession).where(InterviewSession.id == session_id)
+            )).scalar_one_or_none()
+            interviewer = (await db.execute(
+                select(User).where(User.id == interviewer_id)
+            )).scalar_one_or_none()
+            if not session or not interviewer:
+                return
+            result = await mailer.send_email(_render_invite(session, interviewer))
+            if result.sent or result.mode == "outbox":
+                session.invite_sent_at = datetime.now(timezone.utc)
+                await db.commit()
+    except Exception as exc:  # noqa: BLE001
+        # Best-effort — session and quota are already committed; log and continue
+        _log.warning(f"Background invite send failed for session {session_id}: {exc}")
+
+
 def _out(session: InterviewSession, invite: InviteStatus | None = None) -> SessionOut:
     out = SessionOut.model_validate(session)
     out.invite = invite
@@ -78,10 +111,11 @@ async def list_sessions(
 @router.post("", response_model=SessionOut, status_code=201)
 async def create_session(
     body: SessionCreate,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_interviewer),
 ):
-    # Only accept problems that exist, preserving the requested order
+    # Validate problem IDs (existing logic unchanged)
     problem_ids: list[str] = []
     if body.problem_ids:
         try:
@@ -98,6 +132,7 @@ async def create_session(
     while (await db.execute(select(InterviewSession).where(InterviewSession.access_token == token))).scalar_one_or_none():
         token = _generate_token()
 
+    # Build session object — NOT added to DB yet
     session = InterviewSession(
         access_token=token,
         title=body.title,
@@ -109,17 +144,38 @@ async def create_session(
         candidate_role=body.candidate_role,
         scheduled_at=body.scheduled_at,
         status=SessionStatus.scheduled,
+        quota_consumed=False,
     )
-    db.add(session)
-    await db.flush()
 
-    invite = None
+    # Phase 1: atomic quota check + session creation (single transaction)
+    # consume_quota_and_create_session uses SELECT FOR UPDATE, increments
+    # interviews_used, adds session to DB, and flushes — all within the
+    # current get_db transaction. get_db commits when this route returns.
+    try:
+        session = await consume_quota_and_create_session(current_user.id, session, db)
+    except QuotaExceededError as exc:
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "code": "interview_limit_reached",
+                "tier": exc.tier,
+                "used": exc.used,
+                "limit": exc.limit,
+            },
+        )
+
+    # Phase 2: invite email — scheduled as BackgroundTask so it runs AFTER
+    # the DB transaction commits (get_db commits on route return).
+    # This guarantees the invite is never sent while holding a quota lock.
     if body.send_invite and session.candidate_email:
-        invite = await _send_invite(session, current_user)
-        await db.flush()
+        background_tasks.add_task(
+            _send_invite_background,
+            session_id=session.id,
+            interviewer_id=current_user.id,
+        )
 
     await db.refresh(session)
-    return _out(session, invite)
+    return _out(session, invite=None)
 
 
 @router.get("/by-token/{access_token}", response_model=SessionOut)
@@ -211,15 +267,26 @@ async def cancel_session(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_interviewer),
 ):
-    """Withdraw an interview; its access token stops working."""
+    """Withdraw an interview; its access token stops working.
+    Returns one interview credit to the interviewer (idempotent)."""
     session = await _owned_session(session_id, db, current_user)
     if session.status == SessionStatus.completed:
         raise HTTPException(409, "Completed sessions can't be cancelled")
+    if session.status == SessionStatus.cancelled:
+        return session  # Already cancelled — idempotent, no quota change
     session.status = SessionStatus.cancelled
     session.ended_at = session.ended_at or datetime.now(timezone.utc)
     await db.flush()
+
+    # Atomic quota refund: SELECT FOR UPDATE on subscription then session.
+    # Consistent lock ordering (sub first, then session) prevents deadlock
+    # with concurrent consume_quota_and_create_session calls.
+    # Idempotent: no-op if session.quota_consumed is already False.
+    await refund_quota(current_user.id, session_id, db)
+
     await db.refresh(session)
     return session
+    # get_db commits both the status change and quota refund atomically
 
 
 @router.post("/{session_id}/invite", response_model=SessionOut)

@@ -5,8 +5,10 @@ from app.models.submission import Submission
 from app.models.signal import ProctoringSignal
 from app.models.snapshot import CodeSnapshot
 from app.models.similarity import SimilarityReport
+from app.models.subscription import Subscription, PaymentRecord, WebhookEvent
 
 __all__ = [
     "User", "Problem", "TestCase", "InterviewSession",
     "Submission", "ProctoringSignal", "CodeSnapshot", "SimilarityReport",
+    "Subscription", "PaymentRecord", "WebhookEvent",
 ]

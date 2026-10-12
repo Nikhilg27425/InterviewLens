@@ -29,7 +29,8 @@ function LandingNavbar() {
             { label: 'The Problem', href: '#problem' },
             { label: 'Our Solution', href: '#solution' },
             { label: 'Candidate Portal', href: '#candidate-portal' },
-            { label: 'Interviewer Portal', href: '#interviewer-portal' }
+            { label: 'Interviewer Portal', href: '#interviewer-portal' },
+            { label: 'Pricing', href: '#pricing' },
           ].map((item) => (
             <a 
               key={item.label} 
@@ -497,6 +498,106 @@ function Footer() {
   )
 }
 
+function PricingSection() {
+  const plans = [
+    {
+      name: 'Free',
+      price: '₹0',
+      period: 'forever',
+      limit: '5 interviews / month',
+      features: ['5 interviews per month', 'Live code monitoring', 'Candidate proctoring', 'Email invites'],
+      cta: 'Get Started Free',
+      href: '/login',
+      highlighted: false,
+    },
+    {
+      name: 'Premium',
+      price: '₹200',
+      period: '/ month',
+      limit: '50 interviews / month',
+      features: ['50 interviews per month', 'All Free features', 'Plagiarism detection', 'Analytics dashboard', 'Priority support'],
+      cta: 'Start Premium',
+      href: '/login',
+      highlighted: true,
+      badge: 'Most Popular',
+    },
+    {
+      name: 'Enterprise',
+      price: '₹500',
+      period: '/ month',
+      limit: 'Unlimited interviews',
+      features: ['Unlimited interviews', 'All Premium features', 'Advanced AI insights', 'Dedicated support'],
+      cta: 'Start Enterprise',
+      href: '/login',
+      highlighted: false,
+    },
+  ]
+
+  return (
+    <section id="pricing" className="py-24 bg-white">
+      <div className="max-w-7xl mx-auto px-6">
+        <div className="text-center mb-14">
+          <h2 className="text-4xl font-bold text-gray-900 mb-4">Simple, transparent pricing</h2>
+          <p className="text-lg text-gray-500 max-w-xl mx-auto">
+            One-time monthly payments. No subscriptions, no auto-renewal. Pay when you need it.
+          </p>
+        </div>
+
+        <div className="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto">
+          {plans.map((plan) => (
+            <div
+              key={plan.name}
+              className={`relative flex flex-col rounded-2xl p-8 border transition-all duration-300 hover:-translate-y-1 hover:shadow-xl ${
+                plan.highlighted
+                  ? 'border-blue-400 ring-1 ring-blue-400 shadow-lg'
+                  : 'border-gray-200 hover:border-gray-300'
+              }`}
+            >
+              {plan.badge && (
+                <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-blue-600 text-white text-xs font-semibold px-4 py-1 rounded-full">
+                  {plan.badge}
+                </span>
+              )}
+              <div className="mb-6">
+                <p className="text-lg font-bold text-gray-900">{plan.name}</p>
+                <p className="text-4xl font-extrabold text-gray-900 mt-2">
+                  {plan.price}
+                  <span className="text-base font-normal text-gray-400 ml-1">{plan.period}</span>
+                </p>
+                <p className="text-sm text-gray-500 mt-1">{plan.limit}</p>
+              </div>
+
+              <ul className="space-y-3 mb-8 flex-1">
+                {plan.features.map((f) => (
+                  <li key={f} className="flex items-center gap-3 text-sm text-gray-600">
+                    <Check size={15} className="text-emerald-500 flex-shrink-0" />
+                    {f}
+                  </li>
+                ))}
+              </ul>
+
+              <Link
+                to={plan.href}
+                className={`block text-center py-3 rounded-xl font-semibold text-sm transition-all duration-300 hover:scale-[1.02] ${
+                  plan.highlighted
+                    ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-md'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                {plan.cta}
+              </Link>
+            </div>
+          ))}
+        </div>
+
+        <p className="text-center text-sm text-gray-400 mt-10">
+          All plans include a 30-day access window from payment date. No credit card required for Free.
+        </p>
+      </div>
+    </section>
+  )
+}
+
 export default function LandingPage() {
   return (
     <div className="min-h-screen">
@@ -506,6 +607,7 @@ export default function LandingPage() {
       <SolutionSection />
       <CandidatePortalSection />
       <InterviewerPortalSection />
+      <PricingSection />
       <Footer />
     </div>
   )

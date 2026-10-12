@@ -11,7 +11,9 @@ from app.db.base import Base
 import app.models  # noqa: F401
 
 config = context.config
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+# NOTE: URL is intentionally NOT set here at module level, because env.py is
+# only imported once by Python. The URL is read fresh inside run_async_migrations
+# and run_migrations_offline so that test fixtures can pass different cfg objects.
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
@@ -20,7 +22,8 @@ target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
-    url = config.get_main_option("sqlalchemy.url")
+    # Re-read URL from context.config each call (tests may swap the config object)
+    url = context.config.get_main_option("sqlalchemy.url") or settings.DATABASE_URL
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -38,7 +41,10 @@ def do_run_migrations(connection):
 
 
 async def run_async_migrations() -> None:
-    engine = create_async_engine(settings.DATABASE_URL, poolclass=pool.NullPool)
+    # Re-read URL from context.config each call — allows tests to inject a
+    # different database URL by passing their own Config to command.upgrade.
+    url = context.config.get_main_option("sqlalchemy.url") or settings.DATABASE_URL
+    engine = create_async_engine(url, poolclass=pool.NullPool)
     async with engine.begin() as conn:
         await conn.run_sync(do_run_migrations)
     await engine.dispose()
