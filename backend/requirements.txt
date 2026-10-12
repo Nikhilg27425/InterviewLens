@@ -38,3 +38,5 @@ razorpay==1.4.2
 
 # Testing
 pytest==9.1.1
+
+setuptools>=80.0.0
