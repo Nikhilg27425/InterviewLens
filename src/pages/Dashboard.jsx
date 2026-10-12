@@ -140,7 +140,7 @@ export default function Dashboard() {  const [showNew, setShowNew] = useState(fa
           className="flex items-center gap-2 bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-blue-700 transition-colors"
         >
           <Play size={14} fill="white" />
-          Start Live Session
+          Schedule Interview
         </button>
       </div>
 

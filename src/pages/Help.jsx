@@ -1,6 +1,6 @@
 import React from 'react'
 import { Link } from 'react-router-dom'
-import { Play, BookOpen, Mail, Video, ShieldAlert, ClipboardCheck } from 'lucide-react'
+import { Play, BookOpen, Video, ShieldAlert, ClipboardCheck } from 'lucide-react'
 
 const STEPS = [
   {
@@ -50,23 +50,6 @@ export default function Help() {
             <p className="text-sm text-gray-600 leading-relaxed">{body}</p>
           </div>
         ))}
-      </div>
-
-      <div className="bg-white rounded-2xl border border-gray-100 p-5">
-        <div className="flex items-center gap-2 mb-2">
-          <Mail size={16} className="text-blue-600" />
-          <h2 className="font-semibold text-gray-900">Sending real emails</h2>
-        </div>
-        <p className="text-sm text-gray-600 mb-3">
-          Without SMTP settings, invites are written to <code className="bg-gray-100 px-1 rounded">backend/outbox/</code> and can be previewed in the app.
-          To deliver them, add these to <code className="bg-gray-100 px-1 rounded">backend/.env</code> and restart the backend:
-        </p>
-        <pre className="bg-gray-900 text-gray-100 text-xs rounded-lg p-4 overflow-x-auto">{`SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=you@gmail.com
-SMTP_PASSWORD=your-16-char-app-password
-EMAIL_FROM=InterviewLens <you@gmail.com>`}</pre>
-        <p className="text-xs text-gray-400 mt-2">Gmail requires 2-step verification and an App Password. Any SMTP provider works (SendGrid, Mailgun, Amazon SES, Mailtrap for testing).</p>
       </div>
 
       <div className="bg-white rounded-2xl border border-gray-100 p-5">

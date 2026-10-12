@@ -82,7 +82,7 @@ export default function Interviews() {
           onClick={() => setShowNew(true)}
           className="flex items-center gap-2 bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-blue-700"
         >
-          <Play size={14} fill="white" /> Start New Session
+          <Play size={14} fill="white" /> Schedule Interview
         </button>
       </div>
 
@@ -132,7 +132,7 @@ export default function Interviews() {
                 onClick={() => setShowNew(true)}
                 className="inline-flex items-center gap-2 bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-blue-700"
               >
-                <Play size={14} fill="white" /> Start New Session
+                <Play size={14} fill="white" /> Schedule Interview
               </button>
             )}
           </div>

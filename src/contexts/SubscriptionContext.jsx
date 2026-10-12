@@ -21,8 +21,15 @@ export function SubscriptionProvider({ children }) {
     } catch (e) {
       if (e.response?.status === 401) {
         setSub(null)
+      } else {
+        console.error('Failed to load subscription:', e)
+        // Set a default free-tier so the bar is visible even on error
+        if (!sub) {
+          setSub({ tier: 'free', interviews_used: 0, interviews_limit: 5,
+                   percent_used: 0, is_unlimited: false, is_expired: false,
+                   period_end: null })
+        }
       }
-      // Other errors: keep stale data, don't crash
     } finally {
       setLoading(false)
     }

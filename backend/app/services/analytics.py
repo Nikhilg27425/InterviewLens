@@ -23,10 +23,10 @@ RISK_WEIGHTS = {
 
 @dataclass
 class AnalyticsScore:
-    engagement_score: float   # 0-100: how actively the candidate was coding
-    focus_score:      float   # 0-100: inferred from keystroke continuity
-    risk_score:       float   # 0-100: weighted sum of proctoring signals
-    integrity_score:  float   # 0-100: inverse of (risk + similarity)
+    engagement_score: float | None   # None when no snapshot data available
+    focus_score:      float | None   # None when fewer than 2 snapshots
+    risk_score:       float          # 0-100: weighted sum of proctoring signals
+    integrity_score:  float          # 0-100: inverse of (risk + similarity)
     summary:          str
 
 
@@ -42,7 +42,7 @@ def compute_scores(
         avg_kpm = sum(s.get("keystroke_rate") or 0 for s in snapshots) / len(snapshots)
         engagement = min(100.0, avg_kpm * 6)   # 16.7 KPM → 100
     else:
-        engagement = 50.0   # no data → neutral
+        engagement = None   # no snapshots — don't fabricate a score
 
     # ── Focus score ───────────────────────────────────────────────────────────
     # Penalise gaps in coding (long stretches with zero keystroke rate)
@@ -52,7 +52,7 @@ def compute_scores(
         )
         focus = max(0.0, 100.0 - (zero_windows / len(snapshots)) * 100)
     else:
-        focus = 75.0
+        focus = None   # too few snapshots — don't fabricate a score
 
     # ── Risk score ────────────────────────────────────────────────────────────
     risk_raw = sum(RISK_WEIGHTS.get(s.get("risk_level", "info"), 0) for s in signals)
@@ -70,15 +70,24 @@ def compute_scores(
         "medium"   if risk >= 20 else
         "low"
     )
+    if engagement is None:
+        eng_label = 'no data'
+    elif engagement >= 70:
+        eng_label = 'high'
+    elif engagement >= 40:
+        eng_label = 'moderate'
+    else:
+        eng_label = 'low'
+
     summary = (
-        f"Engagement: {'high' if engagement >= 70 else 'moderate' if engagement >= 40 else 'low'}. "
+        f"Engagement: {eng_label}. "
         f"Risk signals: {risk_level} ({len(signals)} total). "
         f"Integrity: {'strong' if integrity >= 80 else 'moderate' if integrity >= 60 else 'review recommended'}."
     )
 
     return AnalyticsScore(
-        engagement_score=round(engagement, 1),
-        focus_score=round(focus, 1),
+        engagement_score=round(engagement, 1) if engagement is not None else None,
+        focus_score=round(focus, 1) if focus is not None else None,
         risk_score=round(risk, 1),
         integrity_score=round(integrity, 1),
         summary=summary,

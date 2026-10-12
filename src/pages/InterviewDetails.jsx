@@ -197,6 +197,21 @@ export default function InterviewDetails() {
     }
   }
 
+  const [cancelling, setCancelling] = useState(false)
+
+  const handleCancel = async () => {
+    if (!window.confirm(`Cancel this interview? The candidate's access token will stop working.`)) return
+    setCancelling(true)
+    try {
+      const { data } = await sessionsAPI.cancel(id)
+      setSession(data)
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Could not cancel this interview.')
+    } finally {
+      setCancelling(false)
+    }
+  }
+
   if (loading) {
     return <div className="flex items-center justify-center h-64"><Loader className="animate-spin text-blue-600" /></div>
   }
@@ -246,19 +261,29 @@ export default function InterviewDetails() {
           </div>
         </div>
         {isOpen && (
-          <Link
-            to={`/live-session?session=${id}`}
-            className="flex items-center gap-2 bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-blue-700 flex-shrink-0"
-          >
-            <Play size={13} fill="white" /> Open Live Session
-          </Link>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <button
+              onClick={handleCancel}
+              disabled={cancelling}
+              className="flex items-center gap-2 border border-red-200 text-red-600 rounded-lg px-4 py-2 text-sm font-semibold hover:bg-red-50 transition-colors disabled:opacity-50"
+            >
+              {cancelling ? <Loader size={13} className="animate-spin" /> : <XCircle size={13} />}
+              Cancel
+            </button>
+            <Link
+              to={`/live-session?session=${id}`}
+              className="flex items-center gap-2 bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-blue-700 flex-shrink-0"
+            >
+              <Play size={13} fill="white" /> Open Live Session
+            </Link>
+          </div>
         )}
       </div>
 
       {/* Computed scores */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <ScoreTile label="Engagement" value={scores ? `${Math.round(scores.engagement_score)}%` : '—'} color="blue" hint={`${scores?.snapshot_count ?? 0} code snapshots`} />
-        <ScoreTile label="Focus" value={scores ? `${Math.round(scores.focus_score)}%` : '—'} color="green" />
+        <ScoreTile label="Engagement" value={scores?.engagement_score != null ? `${Math.round(scores.engagement_score)}%` : '—'} color="blue" hint={`${scores?.snapshot_count ?? 0} code snapshots`} />
+        <ScoreTile label="Focus" value={scores?.focus_score != null ? `${Math.round(scores.focus_score)}%` : '—'} color="green" />
         <ScoreTile
           label="Problems solved"
           value={`${perProblem.filter((p) => p.best?.is_accepted).length}/${problems.length}`}
