@@ -20,6 +20,22 @@ import app.models  # noqa — registers all models with metadata
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 
 
+def _make_alembic_cfg() -> Config:
+    """Build an Alembic Config with the URL explicitly set from settings.
+
+    This deliberately overrides whatever sqlalchemy.url is in alembic.ini so
+    that the deployed container never connects to the localhost placeholder that
+    alembic.ini carries as a development convenience.
+    """
+    cfg = Config(str(BACKEND_DIR / "alembic.ini"))
+    cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
+    # Override the ini-file URL with the real runtime URL from settings.
+    # settings.DATABASE_URL is populated from the DATABASE_URL env var which
+    # Render injects at deploy time; it is never localhost in production.
+    cfg.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+    return cfg
+
+
 async def _prepare() -> bool | None:
     """Create tables on a fresh DB. Returns True for a fresh DB (stamp head), False
     for a DB that predates Alembic tracking (stamp 0001), None if already tracked."""
@@ -39,8 +55,7 @@ async def _prepare() -> bool | None:
 
 
 def init():
-    cfg = Config(str(BACKEND_DIR / "alembic.ini"))
-    cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
+    cfg = _make_alembic_cfg()
 
     fresh = asyncio.run(_prepare())
     if fresh is True:

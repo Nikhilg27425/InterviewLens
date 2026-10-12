@@ -22,8 +22,8 @@ target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
-    # Re-read URL from context.config each call (tests may swap the config object)
-    url = context.config.get_main_option("sqlalchemy.url") or settings.DATABASE_URL
+    # ALWAYS use settings.DATABASE_URL — do not read from alembic.ini placeholder.
+    url = settings.DATABASE_URL
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -41,9 +41,9 @@ def do_run_migrations(connection):
 
 
 async def run_async_migrations() -> None:
-    # Re-read URL from context.config each call — allows tests to inject a
-    # different database URL by passing their own Config to command.upgrade.
-    url = context.config.get_main_option("sqlalchemy.url") or settings.DATABASE_URL
+    # ALWAYS use settings.DATABASE_URL — do not fall back to alembic.ini which
+    # contains a localhost placeholder and would cause connection refused on Render.
+    url = settings.DATABASE_URL
     engine = create_async_engine(url, poolclass=pool.NullPool)
     async with engine.begin() as conn:
         await conn.run_sync(do_run_migrations)

@@ -69,6 +69,16 @@ class Settings(BaseSettings):
             self.RAZORPAY_WEBHOOK_SECRET,
         ]):
             raise ValueError("RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, and RAZORPAY_WEBHOOK_SECRET must be set in production")
+        # Guard against the alembic.ini localhost placeholder leaking into production.
+        # Render always sets DATABASE_URL via the fromDatabase binding in render.yaml.
+        if self.ENV == "production":
+            url_lower = self.DATABASE_URL.lower()
+            if "localhost" in url_lower or "127.0.0.1" in url_lower or "@::1" in url_lower:
+                raise ValueError(
+                    "DATABASE_URL resolves to localhost in production. "
+                    "Ensure the DATABASE_URL environment variable is set in Render "
+                    "and is not falling back to the alembic.ini placeholder."
+                )
         return self
 
     @property
