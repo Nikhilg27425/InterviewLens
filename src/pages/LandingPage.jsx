@@ -9,7 +9,7 @@ function LandingNavbar() {
     const targetId = href.replace('#', '')
     const element = document.getElementById(targetId)
     if (element) {
-      const offset = 80 // Height of fixed navbar + some padding
+      const offset = -12 // Height of fixed navbar (64px) + comfortable padding
       const elementPosition = element.getBoundingClientRect().top
       const offsetPosition = elementPosition + window.pageYOffset - offset
 
@@ -42,16 +42,16 @@ function LandingNavbar() {
             </a>
           ))}
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <Link
             to="/candidate/login"
-            className="text-sm font-semibold text-emerald-700 hover:text-emerald-900 border border-emerald-200 bg-emerald-50 px-4 py-2 rounded-lg hover:bg-emerald-100 transition-all duration-300 hover:scale-105 hover:shadow-md"
+            className="text-sm font-medium text-gray-600 hover:text-gray-900 px-4 py-2 rounded-lg hover:bg-gray-100 transition-colors"
           >
             Candidate Login
           </Link>
           <Link
             to="/login"
-            className="bg-blue-600 text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-blue-700 transition-all duration-300 hover:scale-105 hover:shadow-lg"
+            className="text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg transition-colors"
           >
             Interviewer Login
           </Link>
@@ -90,13 +90,13 @@ function HeroSection() {
               <div className="absolute inset-0 bg-blue-100 rounded-full scale-110 opacity-40" />
               <div className="relative bg-gray-900 rounded-2xl shadow-2xl overflow-hidden w-full max-w-md">
                 {/* Mock live interview UI */}
-                <div className="bg-gray-800 px-4 py-2 flex items-center gap-2">
+                <div className="bg-gray-800 px-4 py-2 flex items-center relative">
                   <div className="flex gap-1.5">
                     <div className="w-3 h-3 rounded-full bg-red-500" />
                     <div className="w-3 h-3 rounded-full bg-yellow-500" />
                     <div className="w-3 h-3 rounded-full bg-green-500" />
                   </div>
-                  <div className="flex-1 flex justify-center">
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                     <span className="text-xs text-green-400 font-medium flex items-center gap-1.5">
                       <span className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse" />
                       Live Interview Active
